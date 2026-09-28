@@ -93,9 +93,12 @@ const NEGATIVO = 'anime, cartoon, chibi, pixel art, vector, flat colors, cel sha
  * apariencia recortada. Lo que no cabe se corta, no se resume con IA.
  */
 export function encargo({ tipo, linaje, descripcion, rol }) {
+  // Sin linaje, la app ya manda el sujeto entero (ver src/art/rasgos.js): no
+  // se le antepone uno por defecto que lo contradiga.
+  const de = linaje && LINAJE[linaje] ? ` of ${LINAJE[linaje]}` : '';
   const quien = tipo === 'enemigo'
     ? 'creature or enemy portrait'
-    : `bust portrait of ${LINAJE[linaje] ?? LINAJE.valdes}${rol ? `, ${rol}` : ''}`;
+    : `bust portrait${de}${rol ? `, ${rol}` : ''}`;
   return `${quien}, ${descripcion}, ${ESTILO}`;
 }
 
@@ -211,9 +214,13 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
   const minuto = [];
   const dia = { fecha: new Date().toISOString().slice(0, 10), n: 0 };
   const pendientes = new Map(); // huella → promesa, para no generar dos veces lo mismo
+  // La app por sus dos nombres de bucle local (mismo puerto): abrir el juego
+  // en 127.0.0.1:8080 en vez de localhost:8080 no es otra web.
+  const gemelo = origen.includes('//localhost') ? origen.replace('//localhost', '//127.0.0.1') : origen.replace('//127.0.0.1', '//localhost');
+  const origenes = new Set([origen, gemelo]);
 
-  const cabeceras = (extra = {}) => ({
-    'Access-Control-Allow-Origin': origen,
+  const cabeceras = (extra = {}, quien = origen) => ({
+    'Access-Control-Allow-Origin': quien,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Expose-Headers': 'X-Arcanveil-Servicio, X-Arcanveil-Proveedor',
@@ -224,7 +231,7 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
     'X-Arcanveil-Servicio': SERVICIO_IMAGEN,
     ...extra,
   });
-  const json = (res, estado, cuerpo) => { res.writeHead(estado, cabeceras({ 'Content-Type': 'application/json; charset=utf-8' })); res.end(JSON.stringify(cuerpo)); };
+  const json = (res, estado, cuerpo) => { res.writeHead(estado, cabeceras({ 'Content-Type': 'application/json; charset=utf-8' }, res.origenPermitido)); res.end(JSON.stringify(cuerpo)); };
   const fallo = (res, estado, codigo, mensaje) => json(res, estado, { error: { code: codigo, message: mensaje } });
   /** Rechazo de origen o Host: sin ninguna cabecera CORS. */
   const rechazo = (res, estado, codigo, mensaje) => {
@@ -286,7 +293,7 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
     // Lo ya generado se devuelve sin gastar cupo.
     if (archivo && existsSync(archivo)) {
       const bytes = await readFile(archivo);
-      res.writeHead(200, cabeceras({ 'Content-Type': bytes[0] === 0xff ? 'image/jpeg' : 'image/png', 'X-Arcanveil-Proveedor': proveedor.id }));
+      res.writeHead(200, cabeceras({ 'Content-Type': bytes[0] === 0xff ? 'image/jpeg' : 'image/png', 'X-Arcanveil-Proveedor': proveedor.id }, res.origenPermitido));
       return res.end(bytes);
     }
 
@@ -317,7 +324,7 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
       if (archivo) { await mkdir(cache, { recursive: true }); await writeFile(archivo, bytes); }
       trazar({ ruta: 'candidata', tipo: p.tipo, proveedor: proveedor.id, bytes: bytes.length });
       if (res.writableEnded || res.destroyed) return;
-      res.writeHead(200, cabeceras({ 'Content-Type': tipo, 'X-Arcanveil-Proveedor': proveedor.id }));
+      res.writeHead(200, cabeceras({ 'Content-Type': tipo, 'X-Arcanveil-Proveedor': proveedor.id }, res.origenPermitido));
       res.end(bytes);
     } catch (e) {
       if (res.destroyed) return;
@@ -338,8 +345,9 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
     const o = req.headers.origin;
     // Estado sin Origin: la comprobación desde la terminal. Todo lo demás
     // exige el origen exacto de la app, y se comprueba ANTES de generar.
-    if (!(req.method === 'GET' && ruta === '/estado' && o === undefined) && o !== origen) return rechazo(res, 403, 'origen', 'Origen no permitido.');
-    if (req.method === 'OPTIONS') { res.writeHead(204, cabeceras()); return res.end(); }
+    if (!(req.method === 'GET' && ruta === '/estado' && o === undefined) && !origenes.has(o)) return rechazo(res, 403, 'origen', 'Origen no permitido.');
+    if (o) res.origenPermitido = o;
+    if (req.method === 'OPTIONS') { res.writeHead(204, cabeceras({}, o)); return res.end(); }
     if (req.method === 'GET' && ruta === '/estado') {
       const salud = await proveedor.salud?.().catch(() => ({ disponible: false, motivo: 'sin respuesta' })) ?? { disponible: true };
       return json(res, 200, { servicio: SERVICIO_IMAGEN, proveedor: proveedor.id, estilo: VERSION_ESTILO, ...salud, usoHoy: dia.n, limites: { porDia: L.porDia, porMinuto: L.porMinuto } });
