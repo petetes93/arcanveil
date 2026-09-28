@@ -18,7 +18,7 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { encargoRetrato } from '../src/art/retrato-ia.js';
+import { sujetoRetrato as encargoRetrato } from '../src/art/rasgos.js';
 
 const VER = process.argv.includes('--ver');
 

@@ -359,6 +359,22 @@ button{font-family:inherit;cursor:pointer}
    nunca se deforma ni deja bandas.
    ═══════════════════════════════════════════════════════════════════════ */
 .arte{display:block;width:100%;height:100%}
+/* Sin imagen elegida: la inicial y el nombre, nada que se parezca a una cara. */
+.marcador-arte{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;padding:.5rem;text-align:center;color:var(--texto-2);background:radial-gradient(circle at 50% 38%,var(--fondo-3),var(--fondo) 74%)}
+.marcador-arte__inicial{font:600 clamp(1.3rem,5vw,2.4rem)/1 var(--display);color:var(--oro);opacity:.8}
+.marcador-arte__nombre{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:.6rem/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase}
+/* El estudio: pintar, ver en privado, elegir. */
+.estudio{width:min(92vw,480px);padding:1rem 1.1rem;border:1px solid var(--linea);border-radius:var(--r);background:var(--fondo-2);color:var(--texto)}
+.estudio::backdrop{background:rgba(0,0,0,.7)}
+.estudio__titulo{margin:0 0 .3rem;font:600 1.1rem var(--display);color:var(--oro)}
+.estudio__nota{margin:0;font-size:.78rem;color:var(--texto-3)}
+.estudio__lienzo{position:relative;width:min(70vw,280px);aspect-ratio:4/5;margin:.8rem auto .4rem;overflow:hidden;border:1px solid var(--linea);border-radius:var(--r)}
+.estudio__lienzo>.arte{position:absolute;inset:0;object-fit:cover}
+.estudio__lienzo[data-estado="generando"]{animation:estudioRespira 1.6s ease-in-out infinite}
+@keyframes estudioRespira{50%{opacity:.6}}
+.estudio__estado{min-height:2.6em;margin:.2rem 0 .6rem;text-align:center;font-size:.85rem;color:var(--texto-2)}
+.estudio__acciones{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center}
+@media(prefers-reduced-motion:reduce){.estudio__lienzo[data-estado="generando"]{animation:none}}
 .arte--imagen{object-fit:cover}
 /* El retrato generado viene más alto que el marco: se ancla arriba para que
    lo que se pierda sea la banda inferior, donde el servicio pone su marca. */
@@ -412,11 +428,8 @@ button{font-family:inherit;cursor:pointer}
 /* La cabecera es una franja muy apaisada y `cover` deja una banda horizontal
    de la imagen: arriba del todo solo había cielo. Un poco por debajo del
    centro caen el horizonte y el suelo, que es donde está la escena. */
-.escena__lienzo>.arte--escena-ia{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 62%;transform:scale(1.08)}
 /* Como los retratos, la escena generada trae a veces un marco pintado y la
    marca del servicio abajo: un 8 % más grande y el marco del lienzo recorta. */
-.linea--escena img{transform:scale(1.08)}.escena-miniatura{overflow:hidden}
-.escena__ampliar+.escena__plegar{margin-left:.35rem}
 /* En combate la silueta vectorial de una criatura tiene que reconocerse, no
    medirse: en el lienzo un enemigo mediano ocupa el 62 % y es una sombra a
    contraluz, y en el marco de combate se veía una figura diminuta sobre
@@ -426,12 +439,6 @@ button{font-family:inherit;cursor:pointer}
 [data-familia-arte="criaturas"][data-tamano-arte="mediano"]>svg.arte{transform:scale(1.5)}
 [data-familia-arte="criaturas"][data-tamano-arte="grande"]>svg.arte{transform:scale(1.2)}
 .linea--escena{margin:.8rem 0;display:flex;flex-direction:column;align-items:flex-start;gap:.3rem}
-.escena-miniatura{padding:0;border:1px solid var(--linea);border-radius:var(--r);overflow:hidden;cursor:zoom-in;background:none;max-width:min(320px,100%)}
-.escena-miniatura img{display:block;width:100%;height:auto;aspect-ratio:1024/560;object-fit:cover;object-position:center top}
-.linea--escena figcaption{font:.7rem var(--mono);color:var(--texto-3)}
-.visor{max-width:min(92vw,1100px);padding:.75rem}
-.visor__img{display:block;width:100%;max-height:78vh;object-fit:contain;border-radius:var(--r)}
-.visor__pie{margin:.5rem 0 0;font:.75rem var(--mono);color:var(--texto-2);text-align:center}
 
 /* ── retrato en el panel de personaje ───────────────────────────────── */
 .retrato-pj{
@@ -640,12 +647,6 @@ body::before{content:'';position:fixed;inset:-20%;z-index:-1;pointer-events:none
 
 /* El arte local no aparece de golpe: el marco enseña que el mundo se está
    calculando a partir de las palabras del jugador. */
-.eleccion__cara::before,.retrato-pj::before{content:attr(data-generando);position:absolute;left:8px;right:8px;bottom:8px;z-index:4;padding:.3rem .45rem;font:600 .56rem/1.2 var(--mono);letter-spacing:.12em;text-align:center;text-transform:uppercase;color:#F0D58A;background:linear-gradient(90deg,transparent,#120D0BE8 18% 82%,transparent);opacity:0;transform:translateY(8px);pointer-events:none}
-.eleccion__cara.se-esta-generando::before,.retrato-pj.se-esta-generando::before{animation:estadoGeneracion .72s ease both}
-.eleccion__cara.se-esta-generando>.arte,.retrato-pj.se-esta-generando>.arte{animation:piezaSeForja .72s cubic-bezier(.2,.8,.2,1) both}
-.eleccion__cara.se-esta-generando{box-shadow:0 0 0 1px #D7AD55,0 0 32px rgba(206,157,58,.3),inset 0 0 28px rgba(239,196,91,.14)}
-@keyframes estadoGeneracion{0%,100%{opacity:0;transform:translateY(8px)}18%,78%{opacity:1;transform:none}}
-@keyframes piezaSeForja{0%{opacity:.25;filter:sepia(1) brightness(1.8) blur(5px);transform:scale(1.08)}48%{opacity:.82;filter:sepia(.55) brightness(1.25) blur(1px)}100%{opacity:1;filter:none;transform:none}}
 /* El personaje generado conserva vida después de forjarse. Los movimientos son
    mínimos para que siga pareciendo un retrato y no una marioneta. */
 .retrato-mirada{animation:miradaViva 5.8s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
@@ -1239,14 +1240,6 @@ textarea.entrada{resize:none;overflow-y:auto;line-height:1.45;max-height:180px;d
       <div class="modal__acciones"><button class="btn" id="ia-probar">Probar conexión</button><button class="btn btn--grande" id="ia-activar" disabled>Usar este modelo</button></div>
       <p class="modal__error" id="ia-estado" aria-live="polite"></p>
     </section>
-  </section>
-</div>
-<!-- ═══ una ilustración en grande ════════════════════════════════════ -->
-<div class="modal modal--visor" id="visor-modal" hidden>
-  <section class="modal__panel visor" role="dialog" aria-modal="true" aria-labelledby="visor-pie">
-    <img class="visor__img" id="visor-img" alt="">
-    <p class="visor__pie" id="visor-pie"></p>
-    <div class="modal__acciones"><button class="btn" id="visor-cerrar" type="button">Cerrar</button></div>
   </section>
 </div>
 

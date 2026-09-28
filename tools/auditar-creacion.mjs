@@ -15,7 +15,7 @@
  */
 
 import { aplicarCorreccion, cambiarSexo, resumenPersonaje, sexoDescrito } from '../src/player/Correccion.js';
-import { encargoRetrato, urlRetrato } from '../src/art/retrato-ia.js';
+import { sujetoRetrato as encargoRetrato } from '../src/art/rasgos.js';
 import { crearPersonaje, construirInventarioInicial } from '../src/player/CharacterFactory.js';
 import { repartoRecomendado, validarReparto } from '../src/player/Attributes.js';
 import { capacidad } from '../src/inventory/Encumbrance.js';
@@ -58,8 +58,6 @@ const corregir = (texto, p = BRUNHILDA) => aplicarCorreccion(p, texto);
   // «a man» o, con especie, «a dwarf man»: sexo y especie van juntos.
   comprobar(/\ba (?:\w+ )?man\b/.test(encargoRetrato(p)) && !/\bwoman\b/.test(encargoRetrato(p)),
     'el retrato pide un hombre', encargoRetrato(p));
-  comprobar(new URL(urlRetrato(p)).searchParams.get('seed') === String(BRUNHILDA.semillaRetrato),
-    'con la misma semilla: cambia lo pedido, no la cara');
   comprobar(p.id === BRUNHILDA.id && p.raza === BRUNHILDA.raza && p.clase === BRUNHILDA.clase && p.lore === BRUNHILDA.lore,
     'lo que no se menciona no se toca');
 }

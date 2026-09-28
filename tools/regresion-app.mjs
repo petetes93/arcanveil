@@ -5,7 +5,8 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { encargoRetrato } from '../src/art/retrato-ia.js';
+import { sujetoRetrato as encargoRetrato } from '../src/art/rasgos.js';
+import { crearProxyImagen } from './imagen-local-proxy.mjs';
 
 const ROOT = process.cwd();
 const PORT = 8765;
@@ -66,6 +67,27 @@ async function json(url, init) {
 
 const server = launch(process.execPath, ['tools/servir.mjs', '--puerto', String(PORT)]);
 let serverErr = ''; server.stderr.on('data', d => { serverErr += d; });
+
+// El generador de imágenes: el puente de verdad en su puerto, con un
+// proveedor falso que devuelve un PNG de 1×1 (ni ComfyUI ni red). Cada
+// generación apunta su semilla: dos versiones tienen que ser dos semillas.
+const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+const generadas = [];
+let estudio = 'sin probar';
+let puenteImagen = null;
+const cacheImagen = await mkdtemp(join(tmpdir(), 'arcanveil-imagenes-'));
+if (!sinIA) {
+  const candidato = crearProxyImagen({
+    origen: `http://127.0.0.1:${PORT}`,
+    cache: cacheImagen,
+    proveedor: { id: 'falso', salud: async () => ({ disponible: true }), generar: async ({ semilla }) => { generadas.push(semilla); return { bytes: PNG_1X1, tipo: 'image/png' }; } },
+  });
+  puenteImagen = await candidato.escuchar().then(() => candidato, () => null);
+}
+const pararPuenteImagen = async () => {
+  if (puenteImagen) await puenteImagen.cerrar().catch(() => {});
+  await rm(cacheImagen, { recursive: true, force: true }).catch(() => {});
+};
 /**
  * Dónde está Chrome.
  *
@@ -109,9 +131,12 @@ let ws;
 let seq = 0;
 const pending = new Map();
 const exceptions = [];
-/** Cuántas veces se pide cada retrato al servicio de imágenes. */
-const pedidosRetrato = new Map();
-const inicioRegresion = Date.now();
+/**
+ * Peticiones de la página a cualquier sitio que no sea esta máquina. El
+ * juego no pide nada fuera: ni retratos ni ilustraciones (antes, a
+ * Pollinations en cada escena). Tiene que quedar vacío.
+ */
+const externos = [];
 function cdp(method, params = {}) {
   const id = ++seq;
   ws.send(JSON.stringify({ id, method, params }));
@@ -149,15 +174,17 @@ try {
       if (m.error) p.reject(new Error(m.error.message)); else p.resolve(m.result);
     } else if (m.method === 'Runtime.exceptionThrown') {
       exceptions.push(m.params.exceptionDetails?.text ?? 'excepción');
-    } else if (m.method === 'Network.requestWillBeSent' && /pollinations\.ai\/prompt\/.*portrait/.test(m.params.request.url)) {
+    } else if (m.method === 'Network.requestWillBeSent') {
       const url = m.params.request.url;
-      pedidosRetrato.set(url, (pedidosRetrato.get(url) ?? 0) + 1);
+      if (/^(?:https?|wss?):/.test(url) && !/^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\//.test(url)) externos.push(url.slice(0, 120));
     }
   };
   await cdp('Runtime.enable'); await cdp('Page.enable'); await cdp('Network.enable');
 
+  // `--sin-ia`: sin generador de imágenes en el equipo. El juego tiene que
+  // seguir igual, con marcadores, y el estudio decir por qué no pinta.
   if (sinIA) {
-    await cdp('Network.setBlockedURLs', { urls: ['*image.pollinations.ai*', '*pollinations.ai*'] });
+    await cdp('Network.setBlockedURLs', { urls: ['*127.0.0.1:11437*', '*localhost:11437*'] });
     await cdp('Page.reload', { ignoreCache: true });
     await until('window.ARCANVEIL?.motor?.listo && document.body.classList.contains("esta-listo")');
   }
@@ -224,18 +251,14 @@ try {
   await evaluate(`document.querySelector('[data-intensidad="relato"]').click()`);
   await evaluate(`document.querySelector('#creacion-crear').click()`);
   await until('document.querySelector("#creacion-empezar") && document.querySelector("#creacion-cara .arte")');
-  // Mismo criterio de dos vías que abajo: la cicatriz vectorial vale, y la
-  // imagen de IA cargada también. Con `--sin-ia` solo puede valer la primera,
-  // que es justo lo que esa opción sirve para comprobar.
-  const retrato = await evaluate(`(() => {
-    const img = document.querySelector('#creacion-cara img.arte--ia');
-    return {
-      cicatriz: Boolean(document.querySelector('#creacion-cara .retrato-rasgo--cicatriz')),
-      imagenIA: Boolean(img && img.complete && img.naturalWidth > 0),
-      botones: [...document.querySelectorAll('#creacion-pie button')].map(b => b.id),
-    };
-  })()`);
-  if (!retrato.cicatriz && !retrato.imagenIA) throw new Error('la descripción libre no llegó al retrato');
+  // Sin pedirlo, no se pinta nada: el marcador con el nombre y el botón
+  // para pintar. Ni cara vectorial ni petición a ningún generador.
+  const retrato = await evaluate(`(() => ({
+    marcador: document.querySelector('#creacion-cara .marcador-arte')?.textContent ?? '',
+    vector: Boolean(document.querySelector('#creacion-cara svg')),
+    pintar: Boolean(document.querySelector('#retrato-pintar')),
+  }))()`);
+  if (!/Lyra/.test(retrato.marcador) || retrato.vector || !retrato.pintar) throw new Error(`la revelación no enseña el marcador con el nombre y el botón de pintar: ${JSON.stringify(retrato)}`);
 
   // «Elfa» en la descripción y un linaje cualquiera en la ficha: la revelación
   // tiene que decirlo, y volver a la ficha no puede crear un gemelo.
@@ -395,6 +418,36 @@ try {
   if (!control) throw new Error('el cebo no se dispara ni metido como HTML: la prueba de XSS no mide nada');
   await evaluate(`(() => { const n = ARCANVEIL.sistema('npcs'); const id = ARCANVEIL.ver('npcs.presentes', []).find((i) => /Cebo/.test(ARCANVEIL.ver('npcs.conocidos.porId.' + i + '.nombre') ?? '')); if (id) n.retirar?.(id); ARCANVEIL.store.dispatch('inventory/retirar', { idObjeto: 'itm_cebo' }); })()`);
 
+  // ─── El estudio de retratos ─────────────────────────────────────────
+  // Pintar solo cuando se pide; la candidata, privada; «Otra versión» pide
+  // otra; «Usar esta versión» la guarda y se ve en la ficha. Con el
+  // generador de verdad (el puente) y un proveedor falso: ni ComfyUI ni red.
+  await evaluate(`document.querySelector('#pj-pintar').click()`);
+  await until('document.querySelector("#estudio[open]")');
+  if (sinIA) {
+    await until('/No hay generador|no deja leer/.test(document.querySelector(".estudio__estado")?.textContent ?? "")', 8000);
+    const sinGenerador = await evaluate(`({ pintar: document.querySelector('#estudio-pintar').disabled, estado: document.querySelector('.estudio__estado').textContent })`);
+    if (!sinGenerador.pintar) throw new Error(`sin generador, el estudio deja pulsar Pintar: ${sinGenerador.estado}`);
+    await evaluate(`document.querySelector('#estudio-cerrar').click()`);
+    estudio = 'sin generador: lo dice y no pinta';
+  } else if (puenteImagen) {
+    await until('/Listo para pintar/.test(document.querySelector(".estudio__estado")?.textContent ?? "")', 8000);
+    await evaluate(`document.querySelector('#estudio-pintar').click()`);
+    await until('document.querySelector("#estudio .estudio__candidata")?.complete', 10000);
+    const primera = await evaluate(`({ texto: document.querySelector('.estudio__estado').textContent, enFicha: Boolean(document.querySelector('#retrato-pj img.arte--aprobada')) })`);
+    if (primera.enFicha) throw new Error('la candidata salió en la ficha antes de elegirla');
+    await evaluate(`document.querySelector('#estudio-otra').click()`);
+    await until('/Versión 2/.test(document.querySelector(".estudio__estado")?.textContent ?? "")', 10000);
+    await shot(`05-estudio-${viewport.label}.png`);
+    await evaluate(`document.querySelector('#estudio-usar').click()`);
+    await until('!document.querySelector("#estudio") && document.querySelector("#retrato-pj img.arte--aprobada")?.complete', 8000);
+    if (generadas.length !== 2 || generadas[0] === generadas[1]) throw new Error(`el estudio no pidió dos versiones distintas: ${JSON.stringify(generadas)}`);
+    estudio = 'pintar, otra versión y usar: en la ficha';
+  } else {
+    await evaluate(`document.querySelector('#estudio-cerrar').click()`);
+    estudio = 'omitido: el puerto 11437 lo usa otro programa';
+  }
+
   // El grupo: reclutar a alguien de la escena, viajar con él, pelear juntos
   // y verlo en el parte.
   await evaluate(`(() => {
@@ -498,15 +551,13 @@ try {
   })()`);
   if (pliegue.antes === pliegue.despues || pliegue.guardado !== pliegue.despues) throw new Error(`plegar la escena no funciona: ${JSON.stringify(pliegue)}`);
 
-  // Sin red, ninguna ilustración: se queda el paisaje de siempre.
-  if (sinIA) {
-    const sinRed = await evaluate(`({
-      miniaturas: ARCANVEIL.ver('narrative.entradas', []).filter((e) => e.voz === 'escena').length,
-      paisaje: Boolean(document.querySelector('#escena-lienzo svg, #escena-lienzo .arte')),
-    })`);
-    if (sinRed.miniaturas) throw new Error('sin red apareció una ilustración de escena');
-    if (!sinRed.paisaje) throw new Error('sin red la cabecera se quedó sin paisaje');
-  }
+  // Ninguna ilustración pedida por su cuenta: la cabecera es el paisaje.
+  const cabecera = await evaluate(`({
+    miniaturas: ARCANVEIL.ver('narrative.entradas', []).filter((e) => e.voz === 'escena').length,
+    paisaje: Boolean(document.querySelector('#escena-lienzo svg, #escena-lienzo .arte')),
+  })`);
+  if (cabecera.miniaturas) throw new Error('apareció una ilustración de escena sin pedirla');
+  if (!cabecera.paisaje) throw new Error('la cabecera se quedó sin paisaje');
 
   // El retrato vale por cualquiera de sus dos vías.
   //
@@ -518,19 +569,14 @@ try {
   //
   // Lo que importa es que la cara del personaje esté puesta, por la vía que
   // sea. Se aceptan las dos y el informe dice cuál fue.
-  const libre = await evaluate(`(() => {
-    const img = document.querySelector('#retrato-pj img.arte--ia');
-    return {
-      texto: ARCANVEIL.ver('narrative.entradas', []).map(e => e.texto ?? '').join(' '),
-      retratoIA: Boolean(img && img.complete && img.naturalWidth > 0),
-      retratoVector: Boolean(document.querySelector('#retrato-pj .retrato-rasgo--cicatriz')),
-    };
-  })()`);
+  const libre = await evaluate(`(() => ({
+    texto: ARCANVEIL.ver('narrative.entradas', []).map(e => e.texto ?? '').join(' '),
+    marcador: Boolean(document.querySelector('#retrato-pj .marcador-arte')),
+    aprobado: Boolean(document.querySelector('#retrato-pj img.arte--aprobada')),
+  }))()`);
 
   if (/intentas\s+anoto/i.test(libre.texto)) throw new Error('acción libre mal integrada');
-  if (!libre.retratoIA && !libre.retratoVector) {
-    throw new Error('el retrato no llegó a la partida (ni imagen de IA ni rasgo vectorial)');
-  }
+  if (!libre.marcador && !libre.aprobado) throw new Error('en la partida no hay ni retrato elegido ni marcador');
 
   // ─── Caer detiene la partida de verdad ──────────────────────────────
   //
@@ -668,24 +714,27 @@ try {
   await shot(`04-offline-${viewport.label}.png`);
   if (offline.title !== 'ARCANVEIL' || offline.failures) throw new Error(`offline inválido ${JSON.stringify(offline)}`);
 
-  // Un retrato que falla no se vuelve a pedir en cada repintado. Sin red los
-  // pide todos y fallan todos: es donde se veía. Con el servicio saturado
-  // (429), pedir nueve veces el mismo retrato era lo que lo mantenía así.
-  // Tras un fallo se espera un minuto, así que lo permitido es el primer
-  // intento más uno por cada minuto que ha durado la prueba (antes: 97).
-  const masPedido = Math.max(0, ...pedidosRetrato.values());
-  const permitidos = 1 + Math.ceil((Date.now() - inicioRegresion) / 60000);
-  if (sinIA && masPedido > permitidos) {
-    const [url] = [...pedidosRetrato].find(([, n]) => n === masPedido);
-    throw new Error(`un retrato que falla se pidió ${masPedido} veces: ${decodeURIComponent(url).slice(0, 140)}`);
+  // El retrato elegido sigue ahí sin red y tras recargar: vive en el
+  // navegador (IndexedDB), no en una dirección de fuera ni en un blob muerto.
+  if (estudio.startsWith('pintar')) {
+    const guardadas = await evaluate(`new Promise((ok) => { const p = indexedDB.open('arcanveil-imagenes'); p.onsuccess = () => { const q = p.result.transaction('aprobadas').objectStore('aprobadas').getAllKeys(); q.onsuccess = () => ok(q.result); q.onerror = () => ok([]); }; p.onerror = () => ok([]); })`);
+    if (!guardadas.some((k) => /^pj:/.test(k))) throw new Error(`sin red y tras recargar, el retrato elegido no está en el navegador: ${JSON.stringify(guardadas)}`);
+    // Y se ve: en la lista de personajes, con su imagen y no con el marcador.
+    await evaluate(`document.querySelector('#menu-nueva').click()`);
+    await until('document.querySelector("img.arte--aprobada")?.complete && document.querySelector("img.arte--aprobada").naturalWidth > 0', 8000);
+    await shot(`06-retrato-sin-red-${viewport.label}.png`);
   }
+
+  if (externos.length) throw new Error(`la página pidió cosas fuera de este equipo: ${[...new Set(externos)].slice(0, 5).join(' · ')}`);
 
   const report = {
     viewport: viewport.label, systems: boot.systems, turns: turns.length,
     maxLogLines: Math.max(...turns.map(t => t.lines)),
     exceptions: exceptions.length, serviceWorkerControlled: beforeOffline.controlled,
     offlineScreen: offline.screen, failures: offline.failures,
-    retrato: libre.retratoIA ? 'ia' : 'vectorial',
+    retrato: libre.aprobado ? 'elegido' : 'marcador',
+    estudio,
+    externos: externos.length,
     sinIA,
   };
   console.log(JSON.stringify(report, null, 2));
@@ -696,5 +745,6 @@ try {
   process.exitCode = 1;
 } finally {
   if (ws?.readyState === WebSocket.OPEN) ws.close();
+  await pararPuenteImagen();
   await stop();
 }

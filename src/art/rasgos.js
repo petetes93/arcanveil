@@ -1,107 +1,24 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * ARCANVEIL · src/art/retrato-ia.js
+ * ARCANVEIL · src/art/rasgos.js
  * ---------------------------------------------------------------------------
- * Retrato generado a partir de lo que el jugador escribe.
+ * Lo que el jugador escribe de su personaje, dicho para un generador de
+ * imágenes: en inglés, con quién es delante y sus rasgos distintivos pronto.
  *
- * **La descripción del jugador ES el encargo.** Si escribe «herrera de barba
- * trenzada, cicatriz en la ceja y delantal quemado», eso es lo que se pinta.
- * No hay ilustración prefabricada que sustituya a eso: un catálogo de ocho
- * caras sirve para ocho personajes, y el jugador quiere el suyo.
- *
- * Usa `image.pollinations.ai`, que devuelve la imagen con una petición GET
- * normal, sin clave y sin cuenta. Eso permite algo importante: **se pide con
- * un `<img src>`**, no con `fetch`. Sin `fetch` no hay CORS que negociar, no
- * hay promesa que gestionar, y el navegador se encarga de la caché y de los
- * reintentos. Si falla, el `onerror` del propio elemento lo dice.
- *
- * Esto SÍ toca la red, y es la única parte del juego que lo hace. Es una
- * excepción consciente al principio de «sin red en ejecución»: ocurre una vez,
- * al crear el personaje, y si no hay conexión el retrato procedural que ya
- * está pintado se queda. La partida nunca depende de que esto funcione.
+ * Salió de `retrato-ia.js`, que pedía el retrato a un servicio anónimo de
+ * fuera (Pollinations) con un encuadre anime. El servicio y el encuadre se
+ * han ido; esto se queda porque el generador local (ComfyUI, vía
+ * tools/imagen-local-proxy.mjs) entiende mejor el inglés, y porque la regla
+ * de «si nombra especie, manda su especie» sigue valiendo. El encuadre y el
+ * estilo los pone el puente (`encargo` y `ESTILO`): aquí solo el sujeto.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { hashSemilla } from '../core/RNG.js';
-import { LINAJES } from './paleta.js';
-import { cargarEnFila } from './cola-imagenes.js';
-
-/** Servicio. Gratuito, sin clave, sin cuenta. */
-const SERVICIO = 'https://image.pollinations.ai/prompt/';
-
-/** Único modelo disponible de forma anónima. */
-const MODELO = 'sana';
-
-/**
- * Tamaño del encargo.
- *
- * El marco del juego es 640×768, pero se piden 64px de más de alto. El
- * servicio estampa su marca en la banda inferior y `nologo=true` solo la quita
- * a quien tiene cuenta, así que en lugar de pedir permiso se pide lienzo de
- * sobra: el recorte de `object-fit: cover` con anclaje arriba se come esa
- * banda y deja el retrato limpio. Nada de tapar con un degradado encima —
- * eso se nota, y a pantalla pequeña se nota más.
- */
-const ANCHO = 640;
-const ALTO = 832;
-
-/** Por debajo de esto, la descripción no da para un encargo. */
+/** Por debajo de esto no hay descripción que pintar. */
 const MINIMO = 8;
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   EL ENCARGO
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/**
- * Cabeza del encargo: estilo en tres palabras y encuadre, y acto seguido el
- * sujeto.
- *
- * **El sujeto tiene que llegar pronto.** Es la lección que costó cuatro
- * tandas: con un párrafo de estilo delante, el modelo gastaba su atención ahí
- * y devolvía a un desconocido. Misma semilla, mismo texto de rasgos, solo
- * cambiando el orden: con el estilo delante salía una chica joven sin barba
- * ni cicatriz ni delantal; con el sujeto pegado al encuadre salía el herrero
- * barbudo con su delantal quemado. El estilo no se pierde por ir corto — se
- * remata al final, y lo que va al final matiza en vez de competir.
- *
- * Y nunca se niega nada («sin armadura», «no épico») porque negar invoca:
- * nombrar lo que no quieres es la forma más fiable de que aparezca. Solo se
- * dice lo que sí.
- *
- * **Hasta dónde llega el anime con este modelo.** Se probaron tres fuerzas de
- * estilo sobre el mismo sujeto y la misma semilla: «anime cel shaded», «2D
- * anime key visual, cel shaded, bold black ink outlines» y «anime screencap,
- * 1990s cel animation, thick ink lineart». Los tres devuelven pintura digital
- * semirrealista, no celda plana. `sana` es el único modelo que el servicio
- * sirve sin cuenta y no da más de sí. Así que aquí se usa la fórmula corta:
- * insistir no mejoraba la imagen y sí le quitaba sitio al sujeto. El anime de
- * verdad vive en el arte vectorial y en las ilustraciones del manifiesto.
- */
-const CABEZA = 'Anime cel shaded bust portrait, head and chest, '
-  + 'three-quarter view of';
-
-/**
- * Sujeto cuando el jugador no dice ni sexo ni especie.
- *
- * Iba fijo en CABEZA y era parte del problema: «one person» deja el sexo al
- * azar, y el modelo lo resolvía como le parecía. Ahora solo aparece cuando de
- * verdad no hay nada mejor que decir.
- */
+/** Sujeto cuando la descripción no dice quién es. */
 const SUJETO_NEUTRO = 'one person';
-
-/** Remate de estilo. Al final matiza; si fuera delante, competiría. */
-/**
- * La paleta del juego, compartida con las ilustraciones de escena
- * (`escena-ia.js`): un retrato y el sitio donde está tienen que parecer del
- * mismo libro.
- */
-export const PALETA = 'limited muted palette of ash grey, iron blue and oxidised bronze, dark low fantasy';
-
-// «plain flat background» a secas salía muchas veces blanco o gris claro,
-// pintado como una lámina con margen: dentro del marco del juego se veía un
-// rectángulo claro alrededor de la cara, unas veces sí y otras no. Fondo
-// oscuro y sin borde, como las escenas.
-const COLA = `plain dark background, full bleed, no border, no frame, no white margin, soft overcast light, ${PALETA}`;
 
 /**
  * Rasgo físico de cada linaje, en inglés.
@@ -524,14 +441,16 @@ function analizar(texto, yaDicho = '') {
 }
 
 /**
- * Construye el encargo completo a partir de la descripción del jugador.
+ * El sujeto del retrato: quién es, sus rasgos distintivos y el resto, en
+ * inglés, sin encuadre ni estilo (los pone el puente).
  *
  * @param {Object} personaje
  * @param {string} personaje.raza
  * @param {string} personaje.descripcion Lo que escribió el jugador.
- * @returns {string|null} El prompt, o null si no hay descripción suficiente.
+ * @param {'f'|'m'} [personaje.genero]
+ * @returns {string|null} null si no hay descripción suficiente.
  */
-export function encargoRetrato(personaje = {}) {
+export function sujetoRetrato(personaje = {}) {
   const descripcion = String(personaje.descripcion ?? personaje.retrato ?? '').trim();
   if (descripcion.length < MINIMO) return null;
 
@@ -603,217 +522,7 @@ export function encargoRetrato(personaje = {}) {
   // El precio es que lo que el glosario no reconoce se pierde. Se acepta: vale
   // más un retrato fiel a seis rasgos que uno confuso que intentó diez. Cuando
   // falte un rasgo, se añade al glosario; no se vuelve a colar español.
-  return `${CABEZA} ${sujeto}. ${COLA}`;
+  return sujeto.slice(0, 300);
 }
 
-/**
- * URL de la imagen para una descripción.
- *
- * La semilla sale del texto, así que la misma descripción da siempre el mismo
- * retrato. Eso importa: el jugador debe reconocer a su personaje al volver a
- * cargar la partida, no encontrarse a un desconocido.
- *
- * @param {Object} personaje
- * @returns {string|null}
- */
-export function urlRetrato(personaje = {}) {
-  const prompt = encargoRetrato(personaje);
-  if (!prompt) return null;
-
-  // Una semilla guardada con el personaje manda: al corregirlo en la
-  // revelación («mejor que sea hombre») el retrato cambia lo pedido y
-  // conserva la cara, en vez de enseñar a un desconocido.
-  const semilla = Number.isFinite(personaje.semillaRetrato) ? personaje.semillaRetrato : semillaDe(personaje);
-
-  const parametros = new URLSearchParams({
-    width: String(ANCHO),
-    height: String(ALTO),
-    seed: String(semilla),
-    nologo: 'true',
-    model: MODELO,
-  });
-
-  return `${SERVICIO}${encodeURIComponent(prompt)}?${parametros}`;
-}
-
-/**
- * La semilla que le toca a un personaje por lo que describe.
- *
- * Sale de lo mismo que da forma a la imagen. Si el jugador nombra su especie,
- * el linaje de la ficha ya no entra en el encargo (ver `encargoRetrato`), así
- * que tampoco en la semilla: volver a tirar el dado cambiaba la cara con el
- * mismo encargo, y además lanzaba otra generación de ~20 s mientras la primera
- * seguía en curso, que el servicio rechaza. Sin especie escrita el linaje sí
- * pinta, y sigue contando.
- *
- * @param {Object} personaje
- * @returns {number}
- */
-export function semillaDe(personaje = {}) {
-  const descripcion = personaje.descripcion ?? personaje.retrato ?? '';
-  const texto = especieNombrada(descripcion) ? `:${descripcion}` : `${personaje.raza ?? ''}:${descripcion}`;
-  return (hashSemilla(texto) >>> 0) % 2_000_000;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   PINTADO
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/** Peticiones en curso, para no pisar una con otra. */
-const enCurso = new WeakMap();
-
-/**
- * Retratos que ya cargaron bien alguna vez en esta sesión.
- *
- * El panel lateral y las miniaturas de combate piden el retrato cada vez que
- * se repintan. Como cada repintado empezaba de cero, en la ronda 1 del combate
- * volvía a verse el retrato vectorial mientras la imagen buena se recargaba,
- * aunque estuviera ya en la caché del navegador. Sabiendo qué URL funcionó se
- * pinta directamente y no hay parpadeo.
- *
- * Es un `Set` de URL, no de imágenes: una `Image` no se puede meter en dos
- * sitios del documento a la vez, así que cada nodo necesita la suya.
- */
-const listos = new Set();
-
-/**
- * Retratos que acaban de fallar, con la hora hasta la que no se reintentan.
- *
- * Cada repintado del panel volvía a pedir el que había fallado. Con el
- * servicio devolviendo 429 por exceso de peticiones, eso era justo lo que lo
- * mantenía saturado: nueve peticiones del mismo retrato en una partida corta.
- * Tras un fallo se espera un minuto; mientras, sigue el vectorial.
- */
-const fallidos = new Map();
-const ESPERA_TRAS_FALLO = 60 * 1000;
-
-/**
- * Recuerda un retrato que ya sabemos que carga.
- *
- * Lo usa la partida al cargarse desde `player.retratoIA`, para que el retrato
- * bueno esté desde el primer pintado y no después de una vuelta por la red.
- *
- * @param {string} url
- */
-export function recordarRetrato(url) {
-  if (url) listos.add(String(url));
-}
-
-/**
- * La URL del retrato de este personaje si ya sabemos que carga.
- *
- * @param {Object} personaje
- * @returns {string|null}
- */
-export function retratoYaListo(personaje = {}) {
-  const url = urlRetrato(personaje);
-  return url && listos.has(url) ? url : null;
-}
-
-/**
- * Avisa a la interfaz de en qué punto va el retrato.
- *
- * Se emite un evento además de llamar al callback porque quien pinta el rótulo
- * («La IA está pintando tu retrato…») no es quien llama a esta función: la
- * cadena pasa por `pintarRetrato`, que no sabe nada de rótulos. El evento sube
- * por el mismo nodo y lo escucha el que lo necesita.
- *
- * @param {HTMLElement} nodo
- * @param {'generando'|'listo'|'sin-red'} estado
- * @param {Function} [alCambiarEstado]
- */
-function avisar(nodo, estado, alCambiarEstado) {
-  nodo.dataset.retratoIa = estado;
-  nodo.dispatchEvent(new CustomEvent('retrato-ia', { detail: { estado } }));
-  alCambiarEstado?.(estado);
-}
-
-/**
- * Sustituye el retrato de un nodo por el generado desde la descripción.
- *
- * El vectorial ya está pintado cuando esto se llama, y **no se borra hasta que
- * la imagen ha cargado**. Al revés se vería un hueco, y si no hay red el hueco
- * se quedaría para siempre.
- *
- * @param {HTMLElement} nodo
- * @param {Object} personaje
- * @param {Function} [alCambiarEstado] Recibe 'generando' | 'listo' | 'sin-red'.
- */
-export function mejorarRetratoIA(nodo, personaje = {}, alCambiarEstado) {
-  if (!nodo) return;
-
-  const url = urlRetrato(personaje);
-  if (!url) return;
-
-  // Ya se está pidiendo exactamente esto: no duplicar.
-  if (enCurso.get(nodo) === url) return;
-
-  // Acaba de fallar: se deja respirar al servicio y se queda el vectorial.
-  if ((fallidos.get(url) ?? 0) > Date.now()) {
-    avisar(nodo, 'sin-red', alCambiarEstado);
-    return;
-  }
-  enCurso.set(nodo, url);
-
-  const img = new Image();
-
-  // Este retrato ya cargó antes: se pinta sin anunciar que se está generando,
-  // porque no se está generando nada.
-  //
-  // Se pone ya, sin esperar al `load`, porque esperar es justo el parpadeo que
-  // se quiere quitar. Pero el juego funciona sin conexión: si la imagen falla,
-  // se devuelve el vectorial que había. Un hueco con el icono de imagen rota
-  // sería peor que el parpadeo.
-  if (listos.has(url)) {
-    const previo = [...nodo.childNodes];
-
-    img.className = 'arte arte--imagen arte--ia';
-    img.alt = personaje.nombre ? `Retrato de ${personaje.nombre}` : 'Retrato';
-
-    img.addEventListener('error', () => {
-      if (enCurso.get(nodo) !== url) return;
-      listos.delete(url);
-      fallidos.set(url, Date.now() + ESPERA_TRAS_FALLO);
-      enCurso.delete(nodo);
-      nodo.replaceChildren(...previo);
-      avisar(nodo, 'sin-red', alCambiarEstado);
-    });
-
-    img.src = url;
-    nodo.replaceChildren(img);
-    avisar(nodo, 'listo', alCambiarEstado);
-    return;
-  }
-
-  avisar(nodo, 'generando', alCambiarEstado);
-
-  img.addEventListener('load', () => {
-    // Puede haber cambiado de personaje mientras cargaba; si es así, no se
-    // pisa lo que haya ahora.
-    if (enCurso.get(nodo) !== url) return;
-
-    // `arte--ia` ancla el encuadre arriba: el retrato llega más alto que el
-    // marco a propósito (ver ALTO) y lo que sobra tiene que caer por abajo.
-    img.className = 'arte arte--imagen arte--ia';
-    img.alt = personaje.nombre ? `Retrato de ${personaje.nombre}` : 'Retrato';
-
-    listos.add(url);
-    nodo.replaceChildren(img);
-    avisar(nodo, 'listo', alCambiarEstado);
-  });
-
-  img.addEventListener('error', () => {
-    if (enCurso.get(nodo) !== url) return;
-
-    // Sin red o servicio caído. El vectorial sigue puesto, que es justo el
-    // comportamiento previsto: el juego no depende de esto.
-    fallidos.set(url, Date.now() + ESPERA_TRAS_FALLO);
-    avisar(nodo, 'sin-red', alCambiarEstado);
-    enCurso.delete(nodo);
-  });
-
-  // En fila con las demás imágenes nuevas: el servicio rechaza las peticiones
-  // en paralelo. Si al llegar su turno el nodo ya no está (el panel se ha
-  // repintado) o pide otro retrato, no se pide.
-  cargarEnFila(img, url, { vigente: () => nodo.isConnected !== false && enCurso.get(nodo) === url });
-}
+export default { sujetoRetrato, especieNombrada, traducirRasgos };

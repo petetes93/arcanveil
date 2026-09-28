@@ -24,11 +24,11 @@
 import { paisaje, atmosfera } from './paisaje.js';
 import { retrato } from './retrato.js';
 import { criatura } from './criatura.js';
-import { mejorarRetratoLocal } from './retrato-local.js';
-import { mejorarRetratoIA, urlRetrato, recordarRetrato, especieNombrada, semillaDe } from './retrato-ia.js';
+import { claveDe, urlAprobada } from './galeria.js';
+import { especieNombrada } from './rasgos.js';
 
 export { paisaje, atmosfera, retrato, criatura };
-export { urlRetrato, recordarRetrato, especieNombrada, semillaDe };
+export { especieNombrada, claveDe };
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MANIFIESTO
@@ -241,63 +241,124 @@ export function pintarLugar(nodo, lugar, mundo = {}) {
   });
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CARAS: APROBADA O MARCADOR
+   ---------------------------------------------------------------------------
+   Una cara solo es una imagen que el jugador ha elegido (ver `galeria.js`),
+   o, para un tipo de enemigo, la ilustración que trae el juego. Si no hay,
+   se ve un marcador neutro con el nombre: la cara vectorial de antes se
+   parecía a todas las demás del mismo linaje y se tomaba por el retrato.
+   Pintar aquí NUNCA pide nada a ningún generador: eso solo pasa cuando el
+   jugador lo pide (ver `candidata.js`).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 /**
- * Pinta el retrato de un personaje.
+ * Marcador neutro: la inicial y el nombre, sin nada que parezca una cara.
+ * Todo con textContent: el nombre puede venir del narrador o de un guardado.
  *
  * @param {HTMLElement} nodo
- * @param {Object} personaje `{ raza, nombre }`.
+ * @param {{nombre?: string, familia?: string}} [datos]
  */
-export function pintarRetrato(nodo, personaje = {}) {
-  pintarArte(nodo, {
-    familia: 'retratos',
-    clave: personaje.raza ?? 'valdes',
-    opciones: {
-      raza: personaje.raza ?? 'valdes',
-      nombre: personaje.nombre ?? '',
-      // La descripción libre distingue rasgos de dos personajes del mismo
-      // linaje. Se guarda con el personaje y también gobierna el generador
-      // pictórico local cuando está disponible.
-      semilla: personaje.descripcion ?? personaje.retrato ?? '',
-      descripcion: personaje.descripcion ?? personaje.retrato ?? '',
-      sinRaster: Boolean((personaje.descripcion ?? personaje.retrato ?? '').trim()),
-    },
-  });
+export function pintarMarcador(nodo, { nombre = '', familia = 'retratos' } = {}) {
+  if (!nodo) return;
+  const limpio = String(nombre ?? '').trim();
+  const firma = `marcador:${familia}:${limpio}`;
+  if (nodo.dataset.firmaArte === firma) return;
+  nodo.dataset.firmaArte = firma;
+  nodo.dataset.familiaArte = familia;
 
-  // Dos vías para convertir la descripción en imagen, y se intentan las dos.
-  //
-  // El puente local es mejor cuando está: no sale nada de la máquina y el
-  // jugador manda sobre el modelo. Pero exige instalar ComfyUI, así que casi
-  // siempre está apagado, y entonces la descripción no pintaba nada.
-  //
-  // La vía remota no exige instalar nada. Si el puente contesta, su resultado
-  // llega después y se queda con el nodo; si no, ya hay retrato.
-  // Quien ha elegido el retrato dibujado se queda con él: no se pide nada.
-  if (personaje.sinIA) return;
-  mejorarRetratoLocal(nodo, personaje);
-  mejorarRetratoIA(nodo, personaje);
+  const caja = document.createElement('div');
+  caja.className = 'arte marcador-arte';
+  caja.setAttribute('role', 'img');
+  caja.setAttribute('aria-label', limpio ? `${limpio}, sin imagen` : 'Sin imagen');
+  const inicial = document.createElement('span');
+  inicial.className = 'marcador-arte__inicial';
+  inicial.setAttribute('aria-hidden', 'true');
+  inicial.textContent = (Array.from(limpio)[0] ?? '·').toUpperCase();
+  const rotulo = document.createElement('span');
+  rotulo.className = 'marcador-arte__nombre';
+  rotulo.setAttribute('aria-hidden', 'true');
+  rotulo.textContent = limpio || 'Sin imagen';
+  caja.append(inicial, rotulo);
+  nodo.replaceChildren(caja);
+}
+
+/** Pone una imagen ya elegida. @returns {boolean} */
+function pintarImagen(nodo, url, { nombre = '', familia, clase = 'arte--aprobada' }) {
+  const firma = `imagen:${url}`;
+  if (nodo.dataset.firmaArte === firma) return true;
+  nodo.dataset.firmaArte = firma;
+  nodo.dataset.familiaArte = familia;
+  const img = new Image();
+  img.className = `arte arte--imagen ${clase}`;
+  img.alt = nombre ? `Retrato de ${nombre}` : '';
+  img.decoding = 'async';
+  img.src = url;
+  nodo.replaceChildren(img);
+  return true;
 }
 
 /**
- * Pinta una criatura.
+ * La clave de imagen de quien se pinta.
+ *
+ * @param {Object} quien `{ claveImagen }`, o `{ id }` (personaje del jugador),
+ *   o `{ refId }` (personaje con nombre).
+ * @returns {string|null}
+ */
+export function claveRetrato(quien = {}) {
+  if (quien.claveImagen) return quien.claveImagen;
+  if (quien.id) return claveDe({ tipo: 'personaje', id: quien.id });
+  if (quien.refId) return claveDe({ tipo: 'pnj', refId: quien.refId });
+  return null;
+}
+
+/**
+ * Pinta el retrato de un personaje: el aprobado, o el marcador con su nombre.
+ *
+ * @param {HTMLElement} nodo
+ * @param {Object} personaje `{ nombre, id | refId | claveImagen }`.
+ */
+export function pintarRetrato(nodo, personaje = {}) {
+  if (!nodo) return;
+  const clave = claveRetrato(personaje);
+  nodo.dataset.claveImagen = clave ?? '';
+  const url = urlAprobada(clave);
+  if (url) { pintarImagen(nodo, url, { nombre: personaje.nombre, familia: 'retratos' }); return; }
+  pintarMarcador(nodo, { nombre: personaje.nombre, familia: 'retratos' });
+}
+
+/**
+ * Pinta un enemigo: la imagen aprobada de su tipo, la ilustración que trae
+ * el juego, o el marcador con su nombre.
+ *
+ * Todos los saqueadores comparten imagen: la clave es el tipo (`refId`), no
+ * cada saqueador. Si la ilustración del juego no carga, se queda el marcador.
  *
  * @param {HTMLElement} nodo
  * @param {Object} enemigo Entrada de `enemies.data.js`.
  */
 export function pintarCriatura(nodo, enemigo = {}) {
-  pintarArte(nodo, {
-    familia: 'criaturas',
-    clave: enemigo.refId ?? 'criatura',
-    opciones: {
-      refId: enemigo.refId ?? 'criatura',
-      tipo: enemigo.tipo,
-      tamano: enemigo.tamano,
-      nombre: enemigo.nombre ?? '',
-      // Sin puerta de «momento clave»: si hay una imagen de esta criatura, se
-      // usa siempre. Guardarla para los jefes dejaba diez de trece ilustraciones
-      // sin ver nunca y el combate corriente con un vector oscuro, que es
-      // exactamente al revés de lo que interesa: al jugador le importa a QUÉ se
-      // enfrenta, y eso ocurre en todos los combates, no solo en el último.
-      // Si la criatura no tiene imagen, el vector sigue estando debajo.
-    },
-  });
+  if (!nodo) return;
+  const refId = enemigo.refId ?? 'criatura';
+  const clave = claveDe({ tipo: 'enemigo', refId });
+  nodo.dataset.claveImagen = clave ?? '';
+  if (enemigo.tamano) nodo.dataset.tamanoArte = enemigo.tamano;
+
+  const aprobada = urlAprobada(clave);
+  if (aprobada) { pintarImagen(nodo, aprobada, { nombre: enemigo.nombre, familia: 'criaturas' }); return; }
+
+  const ruta = rutaRaster('criaturas', refId);
+  if (!ruta) { pintarMarcador(nodo, { nombre: enemigo.nombre, familia: 'criaturas' }); return; }
+
+  const firma = `ilustracion:${version}:${ruta}`;
+  if (nodo.dataset.firmaArte === firma) return;
+  // El marcador mientras carga; la ilustración encima cuando llega.
+  pintarMarcador(nodo, { nombre: enemigo.nombre, familia: 'criaturas' });
+  nodo.dataset.firmaArte = firma;
+  const img = new Image();
+  img.className = 'arte arte--imagen';
+  img.alt = enemigo.nombre ?? '';
+  img.addEventListener('load', () => { if (nodo.dataset.firmaArte === firma) nodo.replaceChildren(img); });
+  img.addEventListener('error', () => { fallidos.add(ruta); });
+  img.src = ruta;
 }

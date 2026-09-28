@@ -51,14 +51,15 @@ import { TurnResolver } from '../src/engine/TurnResolver.js';
 
 import {
   pintarLugar, pintarRetrato, pintarCriatura, cargarManifiesto,
-  urlRetrato, recordarRetrato, especieNombrada, semillaDe,
+  especieNombrada, claveRetrato,
 } from '../src/art/index.js';
+import { abrirGaleria, aprobar, alCambiarGaleria, urlAprobada } from '../src/art/galeria.js';
+import { pedirCandidata, estadoGenerador } from '../src/art/candidata.js';
+import { sujetoRetrato } from '../src/art/rasgos.js';
 import { obtenerEnemigo } from '../src/data/enemies.data.js';
 
 import { fichaAleatoria } from '../src/player/CharacterRandom.js';
 import { aplicarCorreccion, resumenPersonaje, sexoDescrito, PREGUNTA_CREACION } from '../src/player/Correccion.js';
-import { urlEscena } from '../src/art/escena-ia.js';
-import { cargarEnFila } from '../src/art/cola-imagenes.js';
 import {
   listarPersonajes, obtenerPersonaje, guardarPersonaje,
 } from '../src/persistence/CharacterRoster.js';
@@ -110,17 +111,6 @@ function el(tag, attrs = {}, ...hijos) {
 
 function vaciar(nodo) {
   if (nodo) nodo.innerHTML = '';
-}
-
-/** Señala que una pieza procedural se está recomponiendo, sin bloquear la UI. */
-function animarGeneracion(nodo, etiqueta = 'Tejiendo rasgos') {
-  if (!nodo) return;
-  nodo.dataset.generando = etiqueta;
-  nodo.classList.remove('se-esta-generando');
-  void nodo.offsetWidth;
-  nodo.classList.add('se-esta-generando');
-  clearTimeout(nodo._finGeneracion);
-  nodo._finGeneracion = setTimeout(() => nodo.classList.remove('se-esta-generando'), 720);
 }
 
 /** Muestra un fallo en pantalla en vez de dejar la página muda. */
@@ -702,23 +692,25 @@ function crearPersonajeNuevo() {
   // una mujer aunque la ficha aleatoria saliera en masculino.
   const genero = sexoDescrito(descripcion) ?? borrador.genero;
 
-  // La semilla del retrato se fija una vez. Las correcciones de la revelación
-  // cambian lo que se pide, no la cara.
-  const semillaRetrato = Number.isFinite(borrador.semillaRetrato)
-    ? borrador.semillaRetrato
-    : semillaDe({ raza: borrador.raza, descripcion });
-
-  personajeCreado = guardarPersonaje({ ...borrador, nombre, genero, retrato: descripcion, lore, semillaRetrato });
+  personajeCreado = guardarPersonaje({ ...borrador, nombre, genero, retrato: descripcion, lore });
   pintarRevelacion(personajeCreado);
 }
 
-/** Lo que el retrato necesita de una ficha o del jugador en partida. */
-function fichaRetrato(x = {}) {
+/**
+ * Lo que el retrato necesita de una ficha o del jugador en partida.
+ *
+ * El `id` es la identidad de la imagen aprobada (`pj:<id>`): en partida el
+ * jugador no lo lleva en su rama, lo lleva `meta.personajeId`.
+ */
+function fichaRetrato(x = {}, id = x.id ?? null) {
   return {
-    raza: x.raza, nombre: x.nombre, descripcion: x.retrato,
-    genero: x.genero, semillaRetrato: x.semillaRetrato,
-    sinIA: Boolean(x.sinRetratoIA),
+    id, raza: x.raza, nombre: x.nombre, descripcion: x.retrato, genero: x.genero,
   };
+}
+
+/** Ficha de retrato del jugador en partida. */
+function fichaRetratoJugador() {
+  return fichaRetrato(ver('player', {}) ?? {}, ver('meta.personajeId') ?? null);
 }
 
 function pintarRevelacion(p, eco = null) {
@@ -728,7 +720,7 @@ function pintarRevelacion(p, eco = null) {
   $('#creacion-nota').textContent = `${RAZAS[p.raza]?.nombre ?? ''} · ${CLASES[p.clase]?.nombre ?? ''} · ${TRASFONDOS[p.trasfondo]?.nombre ?? ''} · nivel 1 · ${nombreIntensidad(p.intensidad)}`;
 
   const cara = el('div', { class: 'eleccion__cara revelacion__cara', id: 'creacion-cara' });
-  const estado = el('p', { class: 'revelacion__estado', id: 'retrato-estado', text: 'La IA está pintando tu retrato…' });
+  const estado = el('p', { class: 'revelacion__estado', id: 'retrato-estado', text: '' });
 
   // Si la descripción nombra una especie, se dice en voz alta qué pasa con ella.
   //
@@ -758,29 +750,16 @@ function pintarRevelacion(p, eco = null) {
     )
     : null;
 
-  // El retrato generado no siempre sale fiel: el servicio gratuito es el
-  // que es, y no hay forma de comprobar sin coste que pinte el hacha o la
-  // barba. Quien no se reconoce puede pedir otra versión (otra semilla, el
-  // mismo encargo) o quedarse con el retrato que dibuja el juego.
+  // El retrato solo se pinta si el jugador lo pide, y solo se queda si elige
+  // una versión (ver `abrirEstudio`). Antes se pedía solo, a un servicio de
+  // fuera, y se ponía sin preguntar.
   const opcionesRetrato = el('div', { class: 'revelacion__opciones' },
-    p.sinRetratoIA ? null : el('button', {
-      class: 'btn btn--pequeno btn--fantasma', id: 'retrato-otra', type: 'button',
-      onClick: protegido('otra versión del retrato', () => {
-        const base = Number.isFinite(p.semillaRetrato) ? p.semillaRetrato : semillaDe(fichaRetrato(p));
-        Object.assign(p, { semillaRetrato: (base + 104729) % 2_000_000, retratoIA: null, sinRetratoIA: false });
-        guardarPersonaje({ ...(obtenerPersonaje(p.id) ?? p), semillaRetrato: p.semillaRetrato, retratoIA: null, sinRetratoIA: false });
-        pintarRevelacion(p);
-      }),
-    }, 'Otra versión'),
     el('button', {
-      class: 'btn btn--pequeno btn--fantasma', id: 'retrato-dibujado', type: 'button',
-      onClick: protegido('retrato dibujado', () => {
-        const sin = !p.sinRetratoIA;
-        Object.assign(p, { sinRetratoIA: sin, retratoIA: null });
-        guardarPersonaje({ ...(obtenerPersonaje(p.id) ?? p), sinRetratoIA: sin, retratoIA: null });
-        pintarRevelacion(p);
-      }),
-    }, p.sinRetratoIA ? 'Pedir el de la IA' : 'Usar el dibujado'),
+      class: 'btn btn--pequeno', id: 'retrato-pintar', type: 'button',
+      onClick: protegido('pintar retrato', () => abrirEstudio(encargoDePersonaje(p), {
+        alTerminar: () => { pintarRetrato(cara, fichaRetrato(p)); contarRetrato(); },
+      })),
+    }, 'Pintar retrato'),
   );
 
   caja.append(el('div', { class: 'revelacion' },
@@ -822,57 +801,16 @@ function pintarRevelacion(p, eco = null) {
     el('p', { class: 'campo__ayuda', text: 'Por ejemplo: «que sea hombre», «ponle una cicatriz en el ojo», «que se llame Brun», «más joven». O «vale, empezamos».' }),
   );
 
-  // Dos generadores compiten por el mismo hueco: el puente local, que casi
-  // nunca está encendido, y el remoto, que no necesita instalar nada. El
-  // rótulo cuenta lo mejor que haya pasado, no lo último que pasó: si el
-  // remoto pintó el retrato, da igual que el local esté apagado, y decir
-  // «generador apagado» debajo de una imagen recién pintada era mentira.
-  const ROTULOS = {
-    generando: 'La IA está pintando tu retrato…',
-    listo: 'Retrato pintado por la IA a partir de tu descripción. Si no te reconoces, pide otra versión.',
-    ausente: 'Sin generador disponible: se muestra el retrato procedural.',
-    'sin-red': 'Sin generador disponible: se muestra el retrato procedural.',
+  // Qué hay: su retrato elegido, o nada todavía (y cómo tenerlo).
+  const contarRetrato = () => {
+    const hay = Boolean(urlAprobada(claveRetrato(fichaRetrato(p))));
+    estado.textContent = hay
+      ? 'Este es el retrato que elegiste. Puedes pintar otro cuando quieras.'
+      : 'Sin retrato todavía. Si tienes el generador de imágenes en este equipo, píntalo; si no, se juega igual.';
+    estado.dataset.estado = hay ? 'listo' : 'sin';
   };
-
-  let logrado = false;
-
-  const contar = (e) => {
-    // Una revelación ya repintada (tras una corrección) no tiene nada que
-    // decir: su imagen puede terminar de cargar después, y guardaba el
-    // personaje de ANTES encima del corregido.
-    if (!cara.isConnected) return;
-
-    const es = e.detail?.estado ?? '';
-
-    if (es === 'listo') {
-      logrado = true;
-
-      // Se anota con el personaje que este retrato carga. A partir de aquí el
-      // panel lateral y las miniaturas de combate lo pintan directamente, en
-      // esta sesión y en las siguientes. Se fusiona con lo guardado, no se
-      // pisa con la copia que tenía esta pantalla.
-      const url = urlRetrato(fichaRetrato(p));
-      if (url && p.retratoIA !== url) {
-        p.retratoIA = url;
-        guardarPersonaje({ ...(obtenerPersonaje(p.id) ?? p), retratoIA: url });
-      }
-    } else if (logrado) {
-      return;                          // ya hay retrato: nada lo desmiente
-    }
-
-    if (ROTULOS[es]) estado.textContent = ROTULOS[es];
-    estado.dataset.estado = es;
-  };
-
-  cara.addEventListener('retrato-local', contar);
-  cara.addEventListener('retrato-ia', contar);
-
-  if (p.sinRetratoIA) {
-    estado.textContent = 'Retrato dibujado por el juego.';
-  } else {
-    animarGeneracion(cara, 'Pintando retrato');
-  }
-  pintarRetrato(cara, { ...fichaRetrato(p), inmediato: true });
+  pintarRetrato(cara, fichaRetrato(p));
+  contarRetrato();
 
   const pie = $('#creacion-pie');
   vaciar(pie);
@@ -892,8 +830,8 @@ function pintarRevelacion(p, eco = null) {
 /**
  * Aplica lo que el jugador ha escrito en la revelación.
  *
- * Lo que no se menciona se conserva; el retrato se vuelve a pedir con la
- * misma semilla, así que cambia lo pedido y no la cara.
+ * Lo que no se menciona se conserva, también el retrato elegido: no se
+ * vuelve a pintar solo.
  *
  * @param {Object} p
  * @param {string} texto
@@ -909,9 +847,9 @@ function corregirPersonaje(p, texto) {
     return;
   }
 
-  // Mismo id: se corrige este personaje, no nace otro. El retrato anterior ya
-  // no vale, y se anotará el nuevo cuando cargue.
-  personajeCreado = guardarPersonaje({ ...r.personaje, retratoIA: null });
+  // Mismo id: se corrige este personaje, no nace otro. El retrato elegido se
+  // queda con él; si ya no se parece, el jugador pinta otro.
+  personajeCreado = guardarPersonaje({ ...r.personaje });
   pintarRevelacion(personajeCreado, r.cambios.join(' '));
   $('#revelacion-cambio')?.focus();
 }
@@ -1182,16 +1120,10 @@ function pintarEscena() {
   ]);
   const momentoClave = hitosRegion.has(lugar.refId);
 
-  // Si ya hay ilustración de ESTA escena, se queda: no se repinta el paisaje
-  // en cada turno. Solo un cambio de escena trae imagen nueva (ver
-  // `pedirIlustracion`). Si se ha ido a otro sitio, vuelve el paisaje hasta
-  // que llegue la suya.
-  const sub = ver('world.sublugar') ?? null;
-  const conIlustracion = escenaIA && escenaIA.lugar === lugar.refId && escenaIA.sublugar === sub;
-  if (!conIlustracion) {
-    escenaIA = null;
-    pintarLugar($('#escena-lienzo'), lugar, { franja: t.franja, clima, momentoClave });
-  }
+  // El paisaje del sitio (procedural, o la ilustración que trae el juego en
+  // los hitos). Ya no se pide una ilustración a un servicio de fuera en cada
+  // cambio de escena: `pintarLugar` no repinta si nada ha cambiado.
+  pintarLugar($('#escena-lienzo'), lugar, { franja: t.franja, clima, momentoClave });
 
   const rotulo = $('#escena-rotulo');
   if (!rotulo) return;
@@ -1208,14 +1140,6 @@ function pintarEscena() {
     el('span', { class: 'escena__dato', text: FRANJAS_TEXTO[t.franja] ?? '' }),
     el('span', { class: 'escena__sep', text: '·' }),
     el('span', { class: 'escena__dato', text: clima }),
-    // La ilustración de la cabecera se amplía desde aquí. Antes solo se
-    // podía ampliar desde su miniatura en la bitácora, y por eso la misma
-    // imagen salía dos veces, una encima de otra.
-    escenaIA ? el('button', {
-      class: 'escena__plegar escena__ampliar', id: 'escena-ampliar', type: 'button',
-      'aria-label': 'Ver la ilustración en grande', title: 'Ver en grande',
-      onClick: protegido('ampliar escena', () => abrirVisor(escenaIA.url, escenaIA.pie ?? lugar.nombre)),
-    }, '⤢') : '',
     el('button', {
       class: 'escena__plegar', id: 'escena-plegar', type: 'button',
       'aria-expanded': String(!plegada),
@@ -1241,73 +1165,138 @@ function escenaPlegada() {
   return typeof guardada === 'boolean' ? guardada : window.innerHeight < 700;
 }
 
-/* ── ilustraciones de escena ─────────────────────────────────────────── */
-
-/** La ilustración que está puesta, si cargó. @type {{lugar: string, sublugar: string|null, url: string}|null} */
-let escenaIA = null;
-let temporizadorEscena = null;
-
-/** Cómo se titula una ilustración en la bitácora. */
-function pieDeEscena(e) {
-  return [e.nombreSublugar ?? e.nombreLugar, FRANJAS_TEXTO[e.franja]].filter(Boolean).join(', ');
-}
+/* ── estudio de retratos ──────────────────────────────────────────────── */
 
 /**
- * Pide la ilustración de una escena nueva.
- *
- * Espera un momento antes de pedirla: los cambios vienen en racimo —llegar y
- * que aparezca alguien— y el servicio rechaza peticiones en paralelo. Si
- * mientras carga el jugador se va a otro sitio, esta ya no vale y no se pone.
- * Sin red, no carga y se queda el paisaje de siempre: el juego no depende de
- * esto.
- *
- * @param {Object} escena Lo que anuncia `scene:changed`.
+ * Lo que se le pide al generador para un personaje del jugador: el sujeto
+ * en inglés (ver `src/art/rasgos.js`), su clave estable y su nombre.
  */
-function pedirIlustracion(escena) {
-  clearTimeout(temporizadorEscena);
-  temporizadorEscena = setTimeout(() => {
-    const url = urlEscena(escena);
-    const img = new Image();
-    img.className = 'arte arte--imagen arte--escena-ia';
-    img.alt = pieDeEscena(escena);
-
-    const aqui = () => ver('world.ubicacion') === escena.lugar && (ver('world.sublugar') ?? null) === escena.sublugar;
-
-    img.addEventListener('load', () => {
-      if (!aqui()) return;
-
-      escenaIA = { lugar: escena.lugar, sublugar: escena.sublugar, url, pie: pieDeEscena(escena) };
-      const lienzo = $('#escena-lienzo');
-      if (lienzo) {
-        lienzo.replaceChildren(img);
-        // El paisaje procedural se vuelve a pintar entero si hace falta.
-        lienzo.dataset.firmaArte = '';
-      }
-
-      // Y queda en la bitácora, para hojear la partida como un libro.
-      bus.emit('narrative:direct', { texto: pieDeEscena(escena), voz: 'escena', meta: { imagen: url } });
-      refrescarTodo();
-    });
-
-    // En fila con los retratos: el servicio rechaza peticiones en paralelo.
-    // Si al llegar su turno ya se ha ido de ahí, no se pide.
-    cargarEnFila(img, url, { vigente: aqui });
-  }, 1500);
+function encargoDePersonaje(p, id = p.id) {
+  return {
+    tipo: 'personaje',
+    clave: claveRetrato({ id }),
+    nombre: p.nombre ?? '',
+    descripcion: sujetoRetrato({ raza: p.raza, descripcion: p.retrato ?? p.descripcion, genero: p.genero }) ?? '',
+  };
 }
 
+/** Lo mismo para un compañero o personaje con nombre. */
+function encargoDePnj(f) {
+  return {
+    tipo: 'pnj',
+    clave: claveRetrato({ refId: f.refId }),
+    nombre: f.nombre ?? '',
+    rol: f.rol,
+    descripcion: sujetoRetrato({ raza: f.linaje, descripcion: f.descripcion ?? `${f.rol ?? ''} ${f.nombre ?? ''}`, genero: f.genero }) ?? '',
+  };
+}
+
+/** Por dónde va cada clave: «Otra versión» sigue contando al volver a abrir. */
+const variantes = new Map();
+
 /**
- * Abre una ilustración en grande.
- * @param {string} url
- * @param {string} pie
+ * El estudio: pintar, ver la candidata en privado, pedir otra versión y,
+ * solo si el jugador quiere, quedársela.
+ *
+ * Nada se pinta sin que el jugador lo pida. La candidata vive en esta
+ * ventana y se tira al cerrarla; solo «Usar esta versión» la guarda en la
+ * galería del navegador (ver `src/art/galeria.js`). Nunca en combate.
+ *
+ * @param {{tipo: string, clave: string, nombre: string, descripcion: string, rol?: string}} encargo
+ * @param {{alTerminar?: Function}} [op]
  */
-function abrirVisor(url, pie) {
-  const img = $('#visor-img');
-  if (!img) return;
-  img.src = url;
-  img.alt = pie;
-  $('#visor-pie').textContent = pie;
-  $('#visor-modal').hidden = false;
-  $('#visor-cerrar')?.focus();
+function abrirEstudio(encargo, { alTerminar } = {}) {
+  if (ver('combat.activo', false)) {
+    avisar('En combate no se pinta: termina la pelea primero.', 'aviso');
+    return;
+  }
+  if (!encargo?.clave) {
+    avisar('Este personaje no tiene identidad guardada: no se le puede asignar un retrato.', 'aviso');
+    return;
+  }
+  document.getElementById('estudio')?.remove();
+
+  const control = new AbortController();
+  let peticion = 0;
+  let candidata = null;          // { blob, url, variante }
+  let estilo = null;
+
+  const lienzo = el('div', { class: 'estudio__lienzo eleccion__cara', 'aria-live': 'polite' });
+  const estado = el('p', { class: 'estudio__estado', role: 'status' });
+  const pintar = el('button', { class: 'btn', id: 'estudio-pintar', type: 'button' }, 'Pintar');
+  const otra = el('button', { class: 'btn btn--fantasma', id: 'estudio-otra', type: 'button', hidden: true }, 'Otra versión');
+  const usar = el('button', { class: 'btn', id: 'estudio-usar', type: 'button', hidden: true }, 'Usar esta versión');
+  const cerrar = el('button', { class: 'btn btn--fantasma', id: 'estudio-cerrar', type: 'button' }, 'Cerrar');
+
+  const dialogo = el('dialog', { class: 'estudio', id: 'estudio', 'aria-labelledby': 'estudio-titulo' },
+    el('h2', { class: 'estudio__titulo', id: 'estudio-titulo', text: `Retrato de ${encargo.nombre || 'tu personaje'}` }),
+    el('p', { class: 'estudio__nota', text: 'Se pinta en tu equipo. Lo que salga es privado: no se guarda ni se envía a ningún sitio hasta que elijas una versión.' }),
+    lienzo, estado,
+    el('div', { class: 'estudio__acciones' }, pintar, otra, usar, cerrar),
+  );
+
+  const soltar = () => { if (candidata?.url) URL.revokeObjectURL(candidata.url); candidata = null; };
+  const ocupado = (si) => { for (const b of [pintar, otra, usar]) b.disabled = si; };
+  const actual = () => {
+    // Lo que hay ahora: su retrato elegido, o el marcador.
+    pintarRetrato(lienzo, { claveImagen: encargo.clave, nombre: encargo.nombre });
+  };
+
+  async function pedir(variante) {
+    const esta = ++peticion;
+    ocupado(true);
+    estado.textContent = 'Pintando en tu equipo… puede tardar un minuto.';
+    lienzo.dataset.estado = 'generando';
+    try {
+      const r = await pedirCandidata(encargo, { variante, signal: control.signal });
+      if (esta !== peticion || !dialogo.isConnected) return;   // llegó tarde: ya se pidió otra
+      soltar();
+      candidata = { blob: r.blob, url: URL.createObjectURL(r.blob), variante };
+      variantes.set(encargo.clave, variante);
+      const img = el('img', { class: 'arte arte--imagen estudio__candidata', alt: `Versión ${variante + 1} del retrato de ${encargo.nombre}` });
+      img.src = candidata.url;
+      lienzo.dataset.firmaArte = '';
+      lienzo.replaceChildren(img);
+      estado.textContent = `Versión ${variante + 1}. ¿Te la quedas o pides otra?`;
+      pintar.hidden = true; otra.hidden = false; usar.hidden = false;
+    } catch (e) {
+      if (esta !== peticion || !dialogo.isConnected) return;
+      estado.textContent = e.message;
+    } finally {
+      if (esta === peticion) { ocupado(false); delete lienzo.dataset.estado; }
+    }
+  }
+
+  pintar.addEventListener('click', protegido('pintar candidata', () => pedir((variantes.get(encargo.clave) ?? -1) + 1)));
+  otra.addEventListener('click', protegido('otra versión', () => pedir((candidata?.variante ?? variantes.get(encargo.clave) ?? 0) + 1)));
+  usar.addEventListener('click', protegido('usar versión', async () => {
+    if (!candidata) return;
+    ocupado(true);
+    const r = await aprobar(encargo.clave, candidata.blob, { estilo: estilo ?? 'desconocido', tipo: encargo.tipo, nombre: encargo.nombre });
+    if (!r.ok) { estado.textContent = r.motivo; ocupado(false); return; }
+    if (!r.persistente) avisar('Retrato elegido, pero este navegador no deja guardarlo: se perderá al cerrar.', 'aviso');
+    dialogo.close();
+    alTerminar?.();
+    refrescarTodo();
+  }));
+  cerrar.addEventListener('click', () => dialogo.close());
+  dialogo.addEventListener('close', () => { control.abort(); soltar(); dialogo.remove(); });
+
+  document.body.append(dialogo);
+  actual();
+  dialogo.showModal();
+
+  // Abrir el estudio es pedirlo: se mira si hay generador, sin pintar nada.
+  estado.textContent = 'Buscando el generador de imágenes de este equipo…';
+  ocupado(true);
+  estadoGenerador().then((g) => {
+    if (!dialogo.isConnected) return;
+    estilo = g.estilo ?? null;
+    if (!g.ok) { estado.textContent = g.motivo; pintar.disabled = true; return; }
+    if ((encargo.descripcion ?? '').length < 8) { estado.textContent = 'Hace falta una descripción de su aspecto para pintarlo.'; pintar.disabled = true; return; }
+    estado.textContent = urlAprobada(encargo.clave) ? 'Este es el que elegiste. Pinta otro si quieres cambiarlo.' : 'Listo para pintar.';
+    ocupado(false);
+  });
 }
 
 /* ── sugerencias ──────────────────────────────────────────────────────── */
@@ -1880,22 +1869,12 @@ function pintarBitacora() {
       continue;
     }
 
-    // Una ilustración de escena: miniatura entre las líneas, y en grande al
-    // pulsarla.
-    if (e.voz === 'escena' && e.meta?.imagen) {
-      // Mientras esa misma ilustración está arriba, en la cabecera, aquí no
-      // se repite: en el móvil salían las dos una bajo otra y no quedaba
-      // sitio para leer. Cuando cambia la escena, la anterior aparece aquí,
-      // en su sitio de la historia.
-      if (escenaIA?.url === e.meta.imagen) continue;
-      caja.append(el('figure', { class: 'linea linea--escena' },
-        el('button', {
-          class: 'escena-miniatura', type: 'button',
-          'aria-label': `Ver en grande: ${e.texto}`,
-          onClick: () => abrirVisor(e.meta.imagen, e.texto),
-        }, el('img', { src: e.meta.imagen, alt: e.texto, loading: 'lazy' })),
-        el('figcaption', { text: e.texto }),
-      ));
+    // Partidas antiguas guardaban aquí la dirección de una ilustración de un
+    // servicio de fuera. Ya no se carga: pedirla filtraba que se estaba
+    // jugando, y en un guardado manipulado podía apuntar a cualquier sitio.
+    // Queda el pie, que es la parte de la historia.
+    if (e.voz === 'escena') {
+      if (e.texto) caja.append(el('p', { class: 'linea linea--escena', text: e.texto }));
       continue;
     }
 
@@ -2022,14 +2001,19 @@ function pintarPersonaje() {
   const j = ver('player', {}) ?? {};
   vaciar(caja);
 
-  // El retrato depende del linaje y del nombre, así que solo se repinta al
-  // crear el personaje o al cargar otra partida.
-  pintarRetrato($('#retrato-pj'), fichaRetrato(j));
+  // Su retrato elegido, o el marcador. Pintar es cosa del jugador, y nunca
+  // en combate.
+  const ficha = fichaRetratoJugador();
+  pintarRetrato($('#retrato-pj'), ficha);
 
   caja.append(
     el('div', { class: 'ficha-pj' },
       el('span', { class: 'ficha-pj__nombre', text: j.nombre ?? '—' }),
       el('span', { class: 'ficha-pj__clase', text: `nivel ${j.nivel ?? 1}` }),
+      ficha.id && !ver('combat.activo', false) ? el('button', {
+        class: 'btn btn--pequeno btn--fantasma', id: 'pj-pintar', type: 'button',
+        onClick: protegido('pintar retrato', () => abrirEstudio(encargoDePersonaje(j, ficha.id))),
+      }, urlAprobada(claveRetrato(ficha)) ? 'Cambiar retrato' : 'Pintar retrato') : null,
     ),
   );
 
@@ -2180,11 +2164,16 @@ function pintarGrupo(caja) {
         el('span', { class: 'grupo__rol', text: `${f.rol} · ${f.especialidad}` }),
         el('span', { class: 'grupo__vida', text: m.herido ? `Herido · ${vida.actual}/${vida.max}` : `Vida ${vida.actual}/${vida.max}` }),
         el('span', { class: 'grupo__ataque', text: `${f.ataque.nombre} ${f.ataque.dano} · ${f.rasgo}` }),
+        ver('combat.activo', false) ? null : el('button', {
+          class: 'btn btn--pequeno btn--fantasma grupo__pintar', type: 'button', 'data-pintar': f.refId,
+          onClick: protegido('pintar compañero', () => abrirEstudio(encargoDePnj(f))),
+        }, urlAprobada(claveRetrato({ refId: f.refId })) ? 'Cambiar retrato' : 'Pintar retrato'),
       ),
     ));
 
-    // Su retrato sale con las mismas reglas que el del jugador.
-    pintarRetrato(cara, { raza: f.linaje ?? 'valdes', nombre: f.nombre, descripcion: f.descripcion, genero: f.genero });
+    // Su retrato sale con las mismas reglas que el del jugador: el elegido,
+    // o el marcador con su nombre. Por su identidad, no por su linaje.
+    pintarRetrato(cara, { refId: f.refId, nombre: f.nombre });
   }
 }
 
@@ -2651,11 +2640,11 @@ function pintarCombate() {
 
     // El retrato se pinta después de montar la fila: `pintarCriatura` compara
     // una firma contra el nodo y necesita que ya esté en su sitio.
-    if (c.esJugador) pintarRetrato(cara, fichaRetrato(ver('player', {})));
+    if (c.esJugador) pintarRetrato(cara, fichaRetratoJugador());
     else if (c.bando === 'aliado') {
       // Un compañero, con la misma cara que en la pestaña Grupo.
       const f = (sistema('party')?.miembros?.() ?? []).find((m) => m.ficha?.refId === c.refId)?.ficha;
-      if (f) pintarRetrato(cara, { raza: f.linaje ?? 'valdes', nombre: f.nombre, descripcion: f.descripcion, genero: f.genero });
+      if (f) pintarRetrato(cara, { refId: f.refId, nombre: f.nombre });
     } else {
       const plantilla = obtenerEnemigo(c.refId);
       if (plantilla) pintarCriatura(cara, plantilla);
@@ -2993,16 +2982,13 @@ function conectarEventos() {
   bus.on('player:defeated', () => caer('El combate te ha podido.'));
   bus.on('player:down', ({ causa } = {}) => caer(causa ? `Te ha podido ${causa}.` : 'No has aguantado más.'));
 
-  bus.on('player:created', () => { escenaIA = null; });
-
-  // Solo un cambio de escena trae ilustración nueva.
-  bus.on('scene:changed', (escena) => pedirIlustracion(escena));
-
-  // El visor se cierra con su botón, con Escape (como todos los modales) o
-  // pulsando fuera de la imagen.
-  $('#visor-cerrar')?.addEventListener('click', () => { $('#visor-modal').hidden = true; });
-  $('#visor-modal')?.addEventListener('click', (ev) => {
-    if (ev.target.id === 'visor-modal') ev.currentTarget.hidden = true;
+  // Un retrato elegido (o la galería recién cargada) se ve en todas partes:
+  // la galería llega después de pintar la primera pantalla, que suele ser la
+  // de inicio con los personajes guardados.
+  alCambiarGaleria(() => {
+    const pantalla = document.body.getAttribute('data-active-screen');
+    if (pantalla === 'juego') refrescarTodo();
+    else if (pantalla === 'inicio') pintarInicio();
   });
 }
 
@@ -3080,10 +3066,9 @@ async function arrancar() {
     if (pantalla === 'juego') refrescarTodo();
   });
 
-  // Los retratos que ya cargaron en otra sesión se pintan desde el primer
-  // momento. Solo es una URL anotada: si sin red la imagen falla,
-  // `mejorarRetratoIA` devuelve el vectorial y la olvida.
-  for (const pj of listarPersonajes()) recordarRetrato(pj.retratoIA);
+  // Los retratos elegidos viven en el navegador (IndexedDB): se cargan sin
+  // esperar, y al llegar se repinta lo que esté a la vista.
+  abrirGaleria();
 
   try {
     recuperarPersistencia();
