@@ -297,7 +297,11 @@ function _fundir(base, guardado) {
   const salida = { ...base };
 
   for (const [clave, valor] of Object.entries(guardado)) {
-    salida[clave] = clave in base ? _fundir(base[clave], valor) : clonar(valor);
+    // `__proto__ in base` es cierto: se fundía con Object.prototype y
+    // cambiaba el prototipo de la rama. Lo quita ya `parsearSeguro`; aquí,
+    // por si el guardado llega por otro camino.
+    if (CLAVES_PROHIBIDAS.has(clave)) continue;
+    salida[clave] = Object.prototype.hasOwnProperty.call(base, clave) ? _fundir(base[clave], valor) : clonar(valor);
   }
 
   return salida;
@@ -351,6 +355,66 @@ export function aTexto(guardado) {
   return JSON.stringify(guardado, null, 2);
 }
 
+/** Claves que en un objeto de JavaScript no son datos. */
+const CLAVES_PROHIBIDAS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Cuánto se anida un JSON, contado sobre el texto y sin parsearlo: se para
+ * en cuanto pasa del tope. Parsear primero no vale, porque lo que revienta
+ * con miles de niveles es precisamente recorrer lo parseado.
+ *
+ * @param {string} texto
+ * @param {number} tope
+ * @returns {boolean} true si no pasa del tope.
+ */
+function anidamientoDentro(texto, tope) {
+  let nivel = 0;
+  let enCadena = false;
+  for (let i = 0; i < texto.length; i += 1) {
+    const c = texto.charCodeAt(i);
+    if (enCadena) {
+      if (c === 92) i += 1;            // «\»: salta lo escapado
+      else if (c === 34) enCadena = false;
+      continue;
+    }
+    if (c === 34) enCadena = true;
+    else if (c === 123 || c === 91) { nivel += 1; if (nivel > tope) return false; }
+    else if (c === 125 || c === 93) nivel -= 1;
+  }
+  return true;
+}
+
+/**
+ * Parsea un guardado sin fiarse de él: tamaño, anidamiento y claves que no
+ * son datos, antes de que nada lo recorra.
+ *
+ * Un `__proto__` en el archivo cambiaba el prototipo de la rama al fundirla
+ * (`clave in base` es cierto para `__proto__`), y miles de niveles de
+ * anidamiento reventaban la pila.
+ *
+ * @param {string} texto
+ * @returns {{objeto: Object|null, error: string|null, quitadas: number}}
+ */
+export function parsearSeguro(texto) {
+  if (texto.length > PERSISTENCIA.importacionMaxBytes) {
+    const kb = (n) => Math.round(n / 1024);
+    return { objeto: null, quitadas: 0, error: `el archivo es demasiado grande para ser una partida (${kb(texto.length)} KB; como mucho ${kb(PERSISTENCIA.importacionMaxBytes)} KB)` };
+  }
+  if (!anidamientoDentro(texto, PERSISTENCIA.profundidadMax)) {
+    return { objeto: null, quitadas: 0, error: 'el archivo tiene una estructura imposible para una partida' };
+  }
+  let quitadas = 0;
+  try {
+    const objeto = JSON.parse(texto, (clave, valor) => {
+      if (CLAVES_PROHIBIDAS.has(clave)) { quitadas += 1; return undefined; }
+      return valor;
+    });
+    return { objeto, error: null, quitadas };
+  } catch (e) {
+    return { objeto: null, quitadas: 0, error: `no es un guardado válido: ${e.message}` };
+  }
+}
+
 /**
  * Lee un guardado desde texto.
  *
@@ -362,16 +426,16 @@ export function desdeTexto(texto) {
     return { guardado: null, error: 'el archivo está vacío' };
   }
 
-  let objeto;
+  const { objeto, error } = parsearSeguro(texto);
+  if (error) return { guardado: null, error };
 
-  try {
-    objeto = JSON.parse(texto);
-  } catch (e) {
-    return { guardado: null, error: `no es un guardado válido: ${e.message}` };
+  if (!objeto || typeof objeto !== 'object' || Array.isArray(objeto) || !objeto.estado || typeof objeto.estado !== 'object' || !objeto.version) {
+    return { guardado: null, error: 'el archivo no parece un guardado de ARCANVEIL' };
   }
 
-  if (!objeto?.estado || !objeto?.version) {
-    return { guardado: null, error: 'el archivo no parece un guardado de ARCANVEIL' };
+  // La versión decide qué migraciones se aplican: un número entero, o nada.
+  if (!Number.isInteger(objeto.version) || objeto.version < 1) {
+    return { guardado: null, error: 'el archivo no dice de qué versión es: no se puede abrir' };
   }
 
   return { guardado: objeto, error: null };

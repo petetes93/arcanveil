@@ -441,7 +441,12 @@ export class SaveManager extends SystemBase {
 
     try {
       const texto = localStorage.getItem(`${PREFIJO}${ranura}`);
-      return texto ? JSON.parse(texto) : null;
+      if (!texto) return null;
+      // Lo guardado aquí también se puede tocar a mano: mismas defensas que
+      // al importar un archivo.
+      const { objeto, error } = Ser.parsearSeguro(texto);
+      if (error) throw new Error(error);
+      return objeto;
     } catch (e) {
       this.log.aviso(`ranura ${ranura} corrupta: ${e.message}`);
       return null;
@@ -654,6 +659,14 @@ export class SaveManager extends SystemBase {
    */
   async importarArchivo(archivo) {
     if (!archivo) return { exito: false, motivo: 'No se ha elegido ningún archivo.' };
+
+    // Antes de leerlo: un archivo de cientos de megas no se carga en memoria
+    // para descubrir después que no era una partida.
+    if (Number.isFinite(archivo.size) && archivo.size > PERSISTENCIA.importacionMaxBytes) {
+      const motivo = `Ese archivo es demasiado grande para ser una partida (${Math.round(archivo.size / 1024)} KB).`;
+      this.emitir('ui:notice', { mensaje: motivo, tipo: 'error' });
+      return { exito: false, motivo };
+    }
 
     try {
       const texto = await archivo.text();

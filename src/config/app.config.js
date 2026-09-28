@@ -260,6 +260,18 @@ export const PERSISTENCIA = congelar({
   /** Tamaño máximo de una ranura, en bytes. */
   tamanoMaxRanura: 900_000,
 
+  /**
+   * Un archivo importado se mira antes de leerlo. Una exportación real, con
+   * sangría, ronda un tercio de esto; lo que pasa de aquí no es una partida.
+   */
+  importacionMaxBytes: 3_000_000,
+
+  /**
+   * Anidamiento máximo de un guardado. El estado real no pasa de 12; un
+   * archivo con miles de niveles reventaba la pila al fundirlo o clonarlo.
+   */
+  profundidadMax: 48,
+
   ranuras: 8,
 
   /**
