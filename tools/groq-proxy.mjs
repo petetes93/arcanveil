@@ -181,6 +181,21 @@ const estimar = (texto) => Math.ceil(String(texto ?? '').length / 3.5);
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /**
+ * El sitio de la app por sus dos nombres de bucle local. Abrir el juego en
+ * http://127.0.0.1:8080 en vez de http://localhost:8080 es la misma máquina
+ * y el mismo puerto, pero para el navegador otro origen: el puente lo
+ * rechazaba y la app decía «No se encuentra el puente».
+ *
+ * @param {string} origen
+ * @returns {Set<string>}
+ */
+export function origenesDe(origen) {
+  const o = String(origen);
+  const gemelo = o.includes('//localhost') ? o.replace('//localhost', '//127.0.0.1') : o.replace('//127.0.0.1', '//localhost');
+  return new Set([o, gemelo]);
+}
+
+/**
  * @param {Object} op
  * @param {string} op.clave La clave de Groq. Solo en memoria.
  * @param {number} [op.puerto=11436]
@@ -207,10 +222,12 @@ export function crearProxyGroq({ clave, puerto = 11436, origen, upstream = UPSTR
 
   // El puerto real se conoce al escuchar (con 0, el sistema elige uno).
   let hosts = new Set([`127.0.0.1:${puerto}`, `localhost:${puerto}`]);
+  const origenes = origenesDe(origen);
 
-  function cabeceras(extra = {}) {
+  // A quién se contesta: el origen permitido que ha preguntado.
+  function cabeceras(extra = {}, quien = origen) {
     return {
-      'Access-Control-Allow-Origin': origen,
+      'Access-Control-Allow-Origin': quien,
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-Arcanveil-Turno',
       'Access-Control-Max-Age': '600',
@@ -223,7 +240,7 @@ export function crearProxyGroq({ clave, puerto = 11436, origen, upstream = UPSTR
   }
 
   function responder(res, estado, cuerpo, extra) {
-    res.writeHead(estado, cabeceras(extra));
+    res.writeHead(estado, cabeceras(extra, res.origenPermitido));
     res.end(JSON.stringify(cuerpo));
   }
 
@@ -336,6 +353,8 @@ export function crearProxyGroq({ clave, puerto = 11436, origen, upstream = UPSTR
     403: 'La cuenta no tiene acceso a este modelo.',
     404: 'El modelo no está disponible en esta cuenta.',
     413: 'El contexto del turno es demasiado largo para Groq.',
+    // Solo lo usa `probar`: en un turno, el 429 se trata aparte (con su espera).
+    429: 'Groq ha frenado esta cuenta: cuota o ritmo de la capa gratuita. Espera un rato; mientras, narra el narrador interno.',
     498: 'Groq no tiene capacidad ahora mismo.',
     502: 'No se pudo hablar con Groq (red).',
     503: 'Groq no está disponible ahora mismo.',
@@ -493,10 +512,11 @@ export function crearProxyGroq({ clave, puerto = 11436, origen, upstream = UPSTR
     // llegaría con su propio nombre y se queda fuera.
     if (!hosts.has(String(req.headers.host ?? ''))) { trazar({ ruta: 'rechazo', motivo: 'host' }); return error(res, 421, 'Host no permitido.'); }
     const origenPeticion = req.headers.origin;
-    if (origenPeticion !== origen) { trazar({ ruta: 'rechazo', motivo: 'origen' }); return error(res, 403, 'Origen no permitido.'); }
+    if (!origenes.has(origenPeticion)) { trazar({ ruta: 'rechazo', motivo: 'origen' }); return error(res, 403, 'Origen no permitido.'); }
+    res.origenPermitido = origenPeticion;
 
     const ruta = String(req.url ?? '').split('?')[0];
-    if (req.method === 'OPTIONS') { res.writeHead(204, cabeceras()); return res.end(); }
+    if (req.method === 'OPTIONS') { res.writeHead(204, cabeceras({}, origenPeticion)); return res.end(); }
     if (req.method === 'GET' && ruta === '/estado') return responder(res, 200, estado());
     if (req.method === 'GET' && ruta === '/probar') return probar(res, inicio);
     if (req.method === 'POST' && ruta === '/v1/chat/completions') {

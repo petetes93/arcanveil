@@ -104,23 +104,49 @@ export class GroqProvider extends IDMProvider {
    * @returns {Promise<{ok: boolean, motivo: string|null, estado?: Object}>}
    */
   async probar() {
-    if (!/^http:\/\/(?:127\.0\.0\.1|localhost):\d+$/.test(this._url)) return { ok: false, motivo: 'Dirección del puente no válida.' };
+    if (!/^http:\/\/(?:127\.0\.0\.1|localhost):\d+$/.test(this._url)) return { ok: false, causa: 'direccion', motivo: 'Dirección del puente no válida.' };
+    let r;
     try {
-      const r = await this._fetch(`${this._url}/probar`);
-      const datos = await r.json().catch(() => ({}));
-      if (!SERVICIO_PUENTE.test(String(datos?.servicio ?? ''))) {
-        this._verificado = null;
-        // Si el puente rechaza (p. ej. por el origen), su motivo es más útil.
-        return { ok: false, motivo: r.ok ? 'En esa dirección contesta algo que no es el puente de ARCANVEIL. No se le enviará nada.' : (datos?.error?.message ?? `Respondió ${r.status}.`) };
-      }
-      if (!r.ok) return { ok: false, motivo: datos?.error?.message ?? `El puente respondió ${r.status}.` };
-      if (!datos.disponible) return { ok: false, motivo: `La cuenta no tiene ${MODELO_GROQ} disponible.` };
-      this._verificado = this._url;
-      const estado = await this.estado();
-      return { ok: true, motivo: null, estado };
+      r = await this._fetch(`${this._url}/probar`);
     } catch {
-      return { ok: false, motivo: 'No se encuentra el puente. Arráncalo con: node tools/iniciar-groq.mjs' };
+      this._verificado = null;
+      return this._sinLectura();
     }
+    const datos = await r.json().catch(() => ({}));
+    if (!SERVICIO_PUENTE.test(String(datos?.servicio ?? ''))) {
+      this._verificado = null;
+      return { ok: false, causa: 'otro_servicio', motivo: `En ${this._url} contesta otro programa: no es el puente de ARCANVEIL. No se le enviará nada. Ciérralo, o arranca el puente en otro puerto.` };
+    }
+    // Lo que diga el puente (clave rechazada, cuota, red) es más útil que un código.
+    if (!r.ok) return { ok: false, causa: `puente_${r.status}`, motivo: datos?.error?.message ?? `El puente respondió ${r.status}.` };
+    if (!datos.disponible) return { ok: false, causa: 'modelo', motivo: `La cuenta no tiene ${MODELO_GROQ} disponible.` };
+    this._verificado = this._url;
+    const estado = await this.estado();
+    return { ok: true, causa: null, motivo: null, estado };
+  }
+
+  /**
+   * Cuando `fetch` no llega a dar respuesta, falla igual si no hay nadie
+   * escuchando que si hay alguien que no deja leer desde esta página (el
+   * puente arrancado para otra dirección, u otro programa sin CORS). Se decía
+   * siempre «No se encuentra el puente», y con el puente arrancado eso
+   * mandaba a arrancarlo otra vez. Una petición opaca (`no-cors`) distingue
+   * las dos cosas: sale si algo contesta, aunque no se pueda leer. Va a
+   * `/estado`, que no llama a Groq.
+   * @private
+   */
+  async _sinLectura() {
+    try {
+      await this._fetch(`${this._url}/estado`, { mode: 'no-cors', cache: 'no-store' });
+    } catch {
+      return { ok: false, causa: 'sin_puente', motivo: `No hay nada escuchando en ${this._url}. Arranca el puente con: node tools/iniciar-groq.mjs` };
+    }
+    const aqui = globalThis.location?.origin ?? 'esta página';
+    return {
+      ok: false,
+      causa: 'no_deja_leer',
+      motivo: `Algo contesta en ${this._url}, pero no deja leer la respuesta desde ${aqui}. O el puente se arrancó para otra dirección (juega en la que indica node tools/iniciar-groq.mjs al arrancar), o ese puerto lo usa otro programa.`,
+    };
   }
 
   /** Uso de hoy y pausas, según el puente. Sin llamar a Groq. */

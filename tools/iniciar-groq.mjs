@@ -20,9 +20,27 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { crearProxyGroq, carpetaDatos, trazadorArchivo, MODELO_PERMITIDO, LIMITES_LOCALES } from './groq-proxy.mjs';
+
+/**
+ * ¿Se puede escuchar en este puerto de 127.0.0.1?
+ *
+ * Se mira antes de pedir nada: con el puerto ocupado, el puente reventaba
+ * con un EADDRINUSE después de haber pegado la clave.
+ *
+ * @param {number} puerto
+ * @returns {Promise<boolean>}
+ */
+export function puertoLibre(puerto) {
+  return new Promise((ok) => {
+    const s = createServer();
+    s.once('error', () => ok(false));
+    s.listen(puerto, '127.0.0.1', () => s.close(() => ok(true)));
+  });
+}
 
 /**
  * Lee una línea sin mostrarla. Admite pegar de golpe, borrar y Ctrl+C.
@@ -100,6 +118,14 @@ async function principal() {
   const origen = `http://localhost:${puertoApp}`;
   const datos = carpetaDatos();
 
+  for (const [puerto, quien, variable] of [[puertoPuente, 'el puente de Groq', 'GROQ_PROXY_PORT'], [puertoApp, 'la app', 'ARCANVEIL_PORT']]) {
+    if (!(await puertoLibre(puerto))) {
+      console.error(`\nEl puerto ${puerto} (${quien}) ya lo usa otro programa: ¿otro puente o la app ya abiertos en otra ventana?`);
+      console.error(`Ciérralo, o elige otro puerto con la variable ${variable}. No se ha pedido ni enviado nada.`);
+      process.exit(1);
+    }
+  }
+
   console.log(`
 ARCANVEIL · narrador con IA Groq (${MODELO_PERMITIDO})
 
@@ -144,8 +170,15 @@ con el narrador procedural.
   }
   clave = null;
 
-  await puente.escuchar();
+  try {
+    await puente.escuchar();
+  } catch (e) {
+    // Alguien lo ocupó entre la comprobación y ahora.
+    console.error(e.code === 'EADDRINUSE' ? `\nEl puerto ${puertoPuente} se ha ocupado mientras tanto. Vuelve a intentarlo.` : `\nNo se pudo arrancar el puente: ${e.message}`);
+    process.exit(1);
+  }
   console.log(`\nPuente de Groq en http://127.0.0.1:${puertoPuente} (la clave no sale de este proceso).`);
+  console.log(`Juega en ${origen}/app/index.html o en http://127.0.0.1:${puertoApp}/app/index.html: el puente acepta las dos.`);
   console.log(`Trazas sin contenido en ${join(datos, 'groq-trazas.jsonl')}`);
 
   // La app, en un proceso aparte que no ve nada de Groq.
