@@ -814,6 +814,14 @@ export class CombatManager extends SystemBase {
 
     if (jugada.aviso) this.emitir('narrative:direct', { texto: jugada.aviso, voz: 'system' });
 
+    // Magia: no hay con qué resolverla todavía. Se ha dicho por qué (el
+    // aviso) y el turno sigue siendo suyo: ni maná, ni ronda, ni el enemigo
+    // aprovecha. Antes salía un golpe de bastón sin avisar.
+    if (jugada.tipo === 'magia') {
+      this.emitir(EVENTOS_COMBATE.ESPERANDO, { ronda: this.leer('combat.ronda', 1), acciones: Iniciativa.accionesDisponibles(jugador) });
+      return jugada;
+    }
+
     this._ultimaJugada = null;
 
     switch (jugada.tipo) {

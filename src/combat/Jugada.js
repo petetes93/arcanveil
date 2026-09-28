@@ -12,6 +12,8 @@
  * Aquí la jugada escrita decide cuatro cosas sin quitar el d20:
  *
  *   · Qué es: atacar, defender, huir, curar, maniobrar o usar un objeto.
+ *     La magia se reconoce pero no se resuelve: todavía no hay hechizos de
+ *     combate, y se dice sin gastar el turno (ver `avisoMagia`).
  *   · A quién: «al herido», «al jefe», «al de la izquierda», por su nombre, o
  *     el que tenía marcado.
  *   · Con qué: un objeto que lleva, si lo nombra.
@@ -70,6 +72,35 @@ const MANIOBRAS = Object.freeze([
 ]);
 
 const GOLPE = /\b(ataco|golpeo|le golpeo|le doy|le pego|le clavo|descargo|lanzo un tajo|tajo|estocada|corto|hiero|apuñalo|apunalo|disparo|le parto|le rajo|le atravieso|le hundo)\b/;
+
+/**
+ * Magia. En combate todavía no hay hechizos: el motor no tiene con qué
+ * resolverlos (coste, alcance, daño). «Alzo mi hechizo y fulmino al
+ * saqueador» se leía como atacar y salía un golpe de bastón, sin avisar.
+ * «Poción mágica» es un objeto: por eso el adjetivo no cuenta, solo el
+ * sustantivo.
+ */
+const MAGIA = /\b(hechiz\w*|conjur\w*|sortilegi\w*|encantamient\w*|magia|fulmin\w*|invoco|invocar|canalizo|bola de fuego|rayo arcano|glifo|glifos|maldigo|maldicion)\b/;
+
+/** Lo que nadie tiene al empezar ni se concede por escribirlo. */
+const DESMEDIDO = /\b(\d{3,})\s*(?:puntos\s+)?(?:de\s+)?(?:dano|danos|puntos)\b|\b(infinit\w*|inmortal\w*|immortal\w*|omnipoten\w*|invencible|todopoderos\w*|dios|dioses|divin\w*)\b|\bmato a todos\b/;
+
+/**
+ * Lo que se le dice al jugador cuando escribe magia en combate: qué no
+ * existe todavía, que no ha gastado nada y qué puede hacer en su lugar.
+ *
+ * @param {string} t Texto sin tildes.
+ * @param {string|null} arma Nombre del arma, como se escribe.
+ * @returns {string}
+ */
+function avisoMagia(t, arma) {
+  const desmedido = t.match(DESMEDIDO);
+  const limite = !desmedido ? ''
+    : desmedido[1] ? `Nadie hace ${desmedido[1]} de daño, ni con magia ni sin ella. `
+      : 'Ni poderes de dios ni fuego infinito: aquí nadie empieza siendo eso. ';
+  const conQue = arma ? `atacar con tu ${String(arma).toLowerCase()}` : 'atacar con lo que llevas';
+  return `${limite}La magia de combate todavía no está en el juego: el hechizo no sale, y no gastas ni el turno ni maná. Puedes ${conQue}, defenderte, huir, hablarles o usar un objeto.`;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    OBJETIVO
@@ -155,6 +186,16 @@ export function leerJugada(texto, contexto = {}) {
   let aviso = null;
 
   // ─── Qué es ─────────────────────────────────────────────────────────────
+  // La magia va antes que nada: no se puede resolver, y convertirla en otra
+  // cosa (un golpe, una huida) sería decidir por el jugador.
+  if (MAGIA.test(t)) {
+    return {
+      tipo: 'magia', objetivo: null, objeto: null, estado: null, golpea: false,
+      creatividad: { valor: 0, motivos: [] },
+      aviso: avisoMagia(t, contexto.arma ?? null),
+    };
+  }
+
   let tipo = 'atacar';
   // Hablar en mitad de la pelea no es atacar ni defenderse: «no quiero
   // pelear», «os ofrezco una tregua», «me rindo». Salvo que en la misma
@@ -187,6 +228,13 @@ export function leerJugada(texto, contexto = {}) {
   if (anacronismo) {
     valor -= 2;
     aviso = `No hay ${anacronismo === 'laser' ? 'nada láser' : `${anacronismo}s`} en este mundo: te lanzas con lo que llevas.`;
+  }
+
+  // «Un golpe que hace 9999 de daño»: el golpe se da, el número no se
+  // concede. El daño lo ponen el arma y la tirada, y se dice.
+  const cifra = t.match(DESMEDIDO);
+  if (!aviso && cifra && ['atacar', 'maniobra'].includes(tipo)) {
+    aviso = cifra[1] ? `El daño no se elige: ni ${cifra[1]} ni ningún otro número. Lo ponen tu arma y la tirada.` : 'Eso no lo tienes: atacas como lo que eres, y el daño lo ponen tu arma y la tirada.';
   }
 
   const armaNombrada = t.match(ARMAS)?.[1];
