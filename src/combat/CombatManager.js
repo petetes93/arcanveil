@@ -947,8 +947,11 @@ export class CombatManager extends SystemBase {
       }
 
       case 'defender': {
-        // Defenderse concede el estado protegido durante una ronda.
-        const r = Estados.aplicar(jugador, 'protegido', { rondas: 1 });
+        // Defenderse protege hasta el final de tu próximo turno: una ronda
+        // entera de ataques enemigos. Las rondas se descuentan al terminar el
+        // turno de quien lleva el estado, así que con 1 caducaba en este mismo
+        // turno, antes de que nadie atacara, y defenderse no servía de nada.
+        const r = Estados.aplicar(jugador, 'protegido', { rondas: 2 });
         this._guardar(r.combatiente);
 
         this.emitir('narrative:direct', {
