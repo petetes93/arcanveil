@@ -127,6 +127,21 @@ export async function crearMotor({ semilla = 20260925, silencio = true } = {}) {
       return textoDesde(antes);
     },
 
+    /** Las sugerencias que la app enseñaría ahora (las tres primeras). */
+    opciones() {
+      return (ver('narrative.opciones', []) ?? []).slice(0, 3);
+    },
+
+    /**
+     * Pulsa una sugerencia como lo hace la app: su texto y su intención.
+     * @param {{label: string, intent?: string}} opcion
+     */
+    async pulsar(opcion) {
+      const antes = entradas().length;
+      await sistema('turns').procesar(opcion.label, { intencionSugerida: opcion.intent });
+      return textoDesde(antes);
+    },
+
     /** Guarda y vuelve a cargar la partida, como al cerrar y abrir. */
     guardarYCargar(ranura = '9') {
       const g = sistema('saves').guardar(ranura, { silencioso: true });
