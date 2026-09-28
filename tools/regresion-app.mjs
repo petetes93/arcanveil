@@ -626,20 +626,28 @@ try {
   // golpeo» es un ataque con +1 por usar la escena, y el enemigo enseña su
   // ficha. Va al final porque el combate se queda abierto: la recarga sin red
   // de después lo descarta, que no se guarda.
-  await evaluate(`ARCANVEIL.store.dispatch('player/curar', { cantidad: 99, origen: 'regresion' })`);
-  await evaluate(`ARCANVEIL.bus.emit('combat:request', { enemies: [{ refId: 'saqueador', count: 1 }], playerAmbush: true })`);
-  await until('ARCANVEIL.ver("combat.activo", false) && ARCANVEIL.sistema("combat").esperandoJugador', 8000);
-  const fichaRival = await evaluate(`document.querySelector('#combate-habilidades')?.textContent ?? ''`);
-  if (!/Machete/.test(fichaRival)) throw new Error(`la ficha del enemigo no enseña sus armas: «${fichaRival}»`);
+  // Si el saqueador esquiva, no hay tirada donde se vea el +1 (y, cobarde,
+  // huye después): no es un fallo de la jugada, es el dado. Pasaba en 2 de
+  // cada 40 combates y tumbaba la regresión. Se repite con otro combate.
+  let jugada = null;
+  for (let intento = 0; intento < 4; intento += 1) {
+    await evaluate(`ARCANVEIL.store.dispatch('player/curar', { cantidad: 99, origen: 'regresion' })`);
+    await evaluate(`ARCANVEIL.bus.emit('combat:request', { enemies: [{ refId: 'saqueador', count: 1 }], playerAmbush: true })`);
+    await until('ARCANVEIL.ver("combat.activo", false) && ARCANVEIL.sistema("combat").esperandoJugador', 8000);
+    const fichaRival = await evaluate(`document.querySelector('#combate-habilidades')?.textContent ?? ''`);
+    if (!/Machete/.test(fichaRival)) throw new Error(`la ficha del enemigo no enseña sus armas: «${fichaRival}»`);
 
-  // Se escucha el ataque al vuelo: si el saqueador huye tras el golpe (es
-  // cobarde), el combate termina y su registro se vacía antes de poder leerlo.
-  await evaluate(`window.__ataques = []; ARCANVEIL.bus.on('combat:attack', (e) => window.__ataques.push(e))`);
-  await evaluate(`ARCANVEIL.jugar('le lanzo arena a los ojos y le golpeo')`);
-  const jugada = await evaluate(`(() => {
-    const e = window.__ataques.find((x) => x.atacante?.esJugador);
-    return e ? { creativo: e.tirada?.creativo ?? null, resultado: e.resultado } : null;
-  })()`);
+    // Se escucha el ataque al vuelo: si el saqueador huye tras el golpe (es
+    // cobarde), el combate termina y su registro se vacía antes de poder leerlo.
+    await evaluate(`window.__ataques = []; ARCANVEIL.bus.on('combat:attack', (e) => window.__ataques.push(e))`);
+    await evaluate(`ARCANVEIL.jugar('le lanzo arena a los ojos y le golpeo')`);
+    jugada = await evaluate(`(() => {
+      const e = window.__ataques.find((x) => x.atacante?.esJugador);
+      return e ? { creativo: e.tirada?.creativo ?? null, resultado: e.resultado } : null;
+    })()`);
+    if (!(jugada?.resultado === 'esquivado' && jugada.creativo === null)) break;
+    await until('!ARCANVEIL.ver("combat.activo", false)', 8000).catch(() => {});
+  }
   if (!jugada) {
     const diag = await evaluate(`(() => { const cm = ARCANVEIL.sistema('combat'); return {
       activo: ARCANVEIL.ver('combat.activo', false), esperando: cm.esperandoJugador,
