@@ -19,6 +19,7 @@
  */
 
 import { SystemBase } from '../core/SystemBase.js';
+import { BORRAR } from '../core/Store.js';
 import { LIMITES } from '../config/app.config.js';
 import { ECONOMIA, COTAS_IA } from '../config/balance.config.js';
 
@@ -219,7 +220,8 @@ export class Inventory extends SystemBase {
     const retirado = Math.min(cantidad, objeto.cantidad);
 
     if (retirado >= objeto.cantidad) {
-      delete porId[idObjeto];
+      // `delete` en la copia no lo quitaba del estado (ver `aplicarParche`).
+      porId[idObjeto] = BORRAR;
       orden = orden.filter((id) => id !== idObjeto);
 
       if (objeto.equipado) {

@@ -252,7 +252,7 @@ export const PERSISTENCIA = congelar({
    * Versión del formato de guardado. Se sube al cambiar la forma del estado y
    * Migrations.js se encarga de convertir los guardados antiguos.
    */
-  versionFormato: 7,
+  versionFormato: 8,
 
   /** Turnos entre autoguardados. */
   turnosEntreAutoguardados: 12,

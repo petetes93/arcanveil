@@ -24,6 +24,7 @@
  */
 
 import { SystemBase } from '../core/SystemBase.js';
+import { BORRAR } from '../core/Store.js';
 import * as Q from './Quest.js';
 import * as Obj from './Objective.js';
 import * as Generador from './QuestGenerator.js';
@@ -756,7 +757,9 @@ export class QuestSystem extends SystemBase {
 
     const activas = estado.quests.activas;
     const porId = { ...activas.porId };
-    delete porId[mision.refId];
+    // `delete` en la copia no la quitaba del estado (ver `aplicarParche`):
+    // cerrada, seguía entre las activas.
+    porId[mision.refId] = BORRAR;
 
     const parche = {
       quests: {

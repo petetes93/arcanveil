@@ -265,6 +265,42 @@ export const MIGRACIONES = Object.freeze([
       return { guardado: { ...g, estado, version: 7 }, avisos };
     },
   },
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     7 → 8 · Fuera lo que ya no estaba
+     ---------------------------------------------------------------------
+     Retirar un objeto o cerrar una misión los quitaba de la lista (`orden`)
+     pero no de `porId` (ver `aplicarParche` y `BORRAR` en core/Store.js):
+     lo comido, bebido o vendido seguía pesando y ofreciéndose en combate, y
+     las misiones cerradas seguían entre las activas. Se quita lo que no está
+     en la lista ni equipado. Lo que sí está no se toca.
+     ───────────────────────────────────────────────────────────────────────── */
+  {
+    desde: 7,
+    descripcion: 'quita los objetos gastados y las misiones cerradas que seguían guardados',
+    aplicar: (g) => {
+      const avisos = [];
+      const estado = clonar(g.estado);
+
+      const objetos = estado.inventory?.objetos;
+      if (objetos?.porId && Array.isArray(objetos.orden)) {
+        const quedan = new Set([...objetos.orden, ...Object.values(estado.inventory.equipado ?? {}).filter(Boolean)]);
+        const fantasmas = Object.keys(objetos.porId).filter((id) => !quedan.has(id));
+        for (const id of fantasmas) delete objetos.porId[id];
+        if (fantasmas.length) avisos.push(`${fantasmas.length} objetos ya gastados dejan de pesar`);
+      }
+
+      const activas = estado.quests?.activas;
+      if (activas?.porId && Array.isArray(activas.orden)) {
+        const siguen = new Set(activas.orden);
+        const cerradas = Object.keys(activas.porId).filter((id) => !siguen.has(id));
+        for (const id of cerradas) delete activas.porId[id];
+        if (cerradas.length) avisos.push(`${cerradas.length} misiones cerradas dejan de figurar como activas`);
+      }
+
+      return { guardado: { ...g, estado, version: 8 }, avisos };
+    },
+  },
 ]);
 
 /* ═══════════════════════════════════════════════════════════════════════════

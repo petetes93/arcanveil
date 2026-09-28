@@ -188,7 +188,9 @@ export function recargarUsos(jugador, tipo = 'largo') {
 
   for (const rasgo of rasgos) {
     const recarga = rasgo.efecto?.recarga;
-    if (recarga && admitidas.includes(recarga)) delete usos[rasgo.refId];
+    // A cero, no `delete`: el parche se funde con el estado y una clave
+    // borrada en la copia seguía gastada. Los rasgos no se recargaban nunca.
+    if (recarga && admitidas.includes(recarga)) usos[rasgo.refId] = 0;
   }
 
   return { player: { usosRasgos: usos } };

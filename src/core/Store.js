@@ -30,6 +30,9 @@ import { DEPURACION } from '../config/app.config.js';
 
 const log = crearCanal('store');
 
+/** Valor de parche que quita la clave del estado (ver `aplicarParche`). */
+export const BORRAR = Symbol('borrar');
+
 /* ═══════════════════════════════════════════════════════════════════════════
    AUXILIARES DE RUTA E INMUTABILIDAD
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -86,7 +89,14 @@ export function escribirRuta(obj, ruta, valor) {
  * Reglas:
  *   · Un objeto plano en el parche se FUNDE con el existente.
  *   · Un array REEMPLAZA por completo (fundir arrays produce sorpresas).
- *   · `undefined` en el parche significa "no tocar"; para borrar, usar null.
+ *   · `undefined` en el parche significa "no tocar"; `null` deja la clave a
+ *     null; `BORRAR` quita la clave.
+ *
+ * Quitar una clave con `delete` en una copia del objeto NO la quita: la
+ * copia se funde con el original y la clave sigue ahí. Pasaba con el
+ * inventario: lo que se comía, bebía o vendía desaparecía de la lista
+ * (`orden`, un array) pero seguía en `porId`, pesando y ofreciéndose en
+ * combate. Veinte pociones bebidas eran diez kilos más de carga.
  *
  * @param {Object} base
  * @param {Object} parche
@@ -100,6 +110,11 @@ export function aplicarParche(base, parche) {
 
   for (const [clave, valor] of Object.entries(parche)) {
     if (valor === undefined) continue;
+
+    if (valor === BORRAR) {
+      if (Object.prototype.hasOwnProperty.call(salida, clave)) { delete salida[clave]; cambiado = true; }
+      continue;
+    }
 
     const anterior = salida[clave];
 
