@@ -109,12 +109,16 @@ ${lista}
 ];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim())));
+// Solo lo propio pasa por la caché: los puentes locales (Groq, imágenes) y
+// cualquier otro origen van directos, o su estado se quedaba congelado en la
+// primera respuesta. La página del juego, de respaldo, solo al navegar.
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
-  event.respondWith(caches.match(event.request).then((hit) => hit || fetch(event.request).then((response) => {
-    if (response.ok) { const copy = response.clone(); caches.open(CACHE).then((cache) => cache.put(event.request, copy)); }
+  const req = event.request;
+  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  event.respondWith(caches.match(req).then((hit) => hit || fetch(req).then((response) => {
+    if (response.ok) { const copy = response.clone(); caches.open(CACHE).then((cache) => cache.put(req, copy)); }
     return response;
-  }).catch(() => caches.match('./app/index.html'))));
+  }).catch(() => (req.mode === 'navigate' ? caches.match('./app/index.html') : Response.error()))));
 });
 `;
 }
