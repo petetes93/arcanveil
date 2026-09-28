@@ -213,6 +213,56 @@ console.log('\n── imagen-local-proxy.mjs: origen, topes y cancelación ─�
   falsoCf.close();
 }
 
+console.log('\n── gemini-proxy.mjs: host, origen, modelo y topes ──');
+{
+  const { crearProxyGemini, MODELOS_GEMINI } = await import('./gemini-proxy.mjs');
+  // Un Gemini falso: cuenta las llamadas y comprueba que la clave llega en
+  // la cabecera, no en la URL.
+  const g = { llamadas: 0, claveEnUrl: false, cabecera: null };
+  const { createServer: crearFalso } = await import('node:http');
+  const falsoGemini = crearFalso((req, res) => {
+    g.llamadas += 1;
+    g.claveEnUrl ||= /clave-de-prueba/.test(req.url);
+    g.cabecera = req.headers['x-goog-api-key'];
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"story":"ok"}' }] } }] }));
+  });
+  const pg = await escuchar(falsoGemini);
+  const ORIGEN = 'http://localhost:8080';
+  const puente = crearProxyGemini({ clave: 'clave-de-prueba', origen: ORIGEN, puerto: 0, upstream: `http://127.0.0.1:${pg}`, limites: { porMinuto: 3 } });
+  const pp = await puente.escuchar();
+  const cuerpo = (modelo = MODELOS_GEMINI[0]) => JSON.stringify({ model: modelo, messages: [{ role: 'user', content: 'hola' }] });
+  const json = { 'Content-Type': 'application/json', Origin: ORIGEN };
+
+  let r = await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: { 'Content-Type': 'text/plain', Origin: 'https://web-ajena.example' }, cuerpo: cuerpo() });
+  comprobar(r.estado === 403 && g.llamadas === 0 && !r.cabeceras['access-control-allow-origin'], 'Gemini: un POST text/plain desde otra web no llega a Gemini ni recibe CORS', r.estado);
+  r = await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: { 'Content-Type': 'text/plain' }, cuerpo: cuerpo() });
+  comprobar(r.estado === 403 && g.llamadas === 0, 'Gemini: sin origen, tampoco', r.estado);
+  r = await pedir(pp, '/v1/chat/completions', { metodo: 'POST', host: 'atacante.example', cabeceras: json, cuerpo: cuerpo() });
+  comprobar(r.estado === 421 && g.llamadas === 0, 'Gemini: con otro Host (DNS rebinding), fuera', r.estado);
+  r = await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: { ...json, 'Content-Type': 'text/plain' }, cuerpo: cuerpo() });
+  comprobar(r.estado === 415 && g.llamadas === 0, 'Gemini: desde la app, solo JSON', r.estado);
+  r = await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: json, cuerpo: cuerpo('gemini-ultra-caro') });
+  comprobar(r.estado === 400 && g.llamadas === 0, 'Gemini: un modelo que no está en la lista no se pide', r.estado);
+  r = await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: json, cuerpo: 'x'.repeat(600 * 1024) });
+  comprobar(r.estado === 413 || r.estado === 0, 'Gemini: un cuerpo enorme se corta', r.estado);
+  r = await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: json, cuerpo: cuerpo() });
+  const dicho = JSON.parse(r.cuerpo.toString() || '{}');
+  comprobar(r.estado === 200 && dicho.choices?.[0]?.message?.content === '{"story":"ok"}' && r.cabeceras['access-control-allow-origin'] === ORIGEN,
+    'Gemini: desde la app, contesta en formato OpenAI', r.estado);
+  comprobar(g.cabecera === 'clave-de-prueba' && !g.claveEnUrl, 'Gemini: la clave va en cabecera hacia Gemini, nunca en la URL');
+  comprobar(!r.cuerpo.toString().includes('clave-de-prueba'), 'Gemini: la clave no vuelve al navegador');
+  await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: json, cuerpo: cuerpo() });
+  await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: json, cuerpo: cuerpo() });
+  r = await pedir(pp, '/v1/chat/completions', { metodo: 'POST', cabeceras: json, cuerpo: cuerpo() });
+  comprobar(r.estado === 429 && g.llamadas === 3, `Gemini: tope por minuto (${g.llamadas} llamadas de 4 pedidas)`, r.estado);
+  let lanza = false;
+  try { crearProxyGemini({ clave: 'x', origen: ORIGEN, upstream: 'https://evil.example' }); } catch { lanza = true; }
+  comprobar(lanza, 'Gemini: la clave no se puede mandar a otra web');
+  await puente.cerrar();
+  falsoGemini.close();
+}
+
 console.log('\n── Puertos ──');
 {
   const { crearProxyGroq } = await import('./groq-proxy.mjs');
