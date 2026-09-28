@@ -153,7 +153,7 @@ export class EconomySystem extends SystemBase {
 
     const resultado = Comercio.ejecutarCompra({
       objeto: datos.objeto,
-      cantidad: datos.cantidad ?? 1,
+      cantidad: datos.cantidad === undefined ? 1 : datos.cantidad,
       precioUnitario: calculo.precio,
       jugador: this.leer('player'),
       inventario: this.leer('inventory'),
@@ -172,7 +172,12 @@ export class EconomySystem extends SystemBase {
     }
 
     // ─── Transacción atómica ────────────────────────────────────────────
-    this._despacharAtomico(resultado.acciones, 'compra');
+    if (!this._despacharAtomico(resultado.acciones, 'compra')) {
+      const mensaje = 'No se ha podido completar la compra: no te ha cobrado nada.';
+      this.emitir(EVENTOS_ECONOMIA.RECHAZO, { motivo: 'revertida', mensaje });
+      this.emitir('narrative:direct', { texto: mensaje, voz: 'system' });
+      return { exito: false, mensaje, total: 0 };
+    }
 
     // El mercader gana el oro y pierde la mercancía.
     if (mercader) {
@@ -181,7 +186,7 @@ export class EconomySystem extends SystemBase {
 
     this.emitir(EVENTOS_ECONOMIA.COMPRA, {
       objeto: datos.objeto.nombre,
-      cantidad: datos.cantidad ?? 1,
+      cantidad: datos.cantidad === undefined ? 1 : datos.cantidad,
       total: resultado.total,
       refIdMercader: datos.refIdMercader,
     });
@@ -225,7 +230,8 @@ export class EconomySystem extends SystemBase {
 
     const resultado = Comercio.ejecutarVenta({
       objeto,
-      cantidad: Math.min(datos.cantidad ?? 1, objeto.cantidad),
+      // Sin recortar: vender más de lo que se lleva se rechaza (ver Trade).
+      cantidad: datos.cantidad === undefined ? 1 : datos.cantidad,
       precioUnitario: calculo.precio,
       mercader,
     });
@@ -246,7 +252,12 @@ export class EconomySystem extends SystemBase {
       };
     }
 
-    this._despacharAtomico(resultado.acciones, 'venta');
+    if (!this._despacharAtomico(resultado.acciones, 'venta')) {
+      const mensaje = 'No se ha podido completar la venta: sigues con lo tuyo.';
+      this.emitir(EVENTOS_ECONOMIA.RECHAZO, { motivo: 'revertida', mensaje });
+      this.emitir('narrative:direct', { texto: mensaje, voz: 'system' });
+      return { exito: false, mensaje, total: 0 };
+    }
 
     // El mercader se queda sin ese oro.
     if (mercader) {
@@ -255,7 +266,7 @@ export class EconomySystem extends SystemBase {
 
     this.emitir(EVENTOS_ECONOMIA.VENTA, {
       objeto: objeto.nombre,
-      cantidad: datos.cantidad ?? 1,
+      cantidad: datos.cantidad === undefined ? 1 : datos.cantidad,
       total: resultado.total,
       refIdMercader: datos.refIdMercader,
     });
@@ -474,16 +485,25 @@ export class EconomySystem extends SystemBase {
   _despacharAtomico(acciones, etiqueta) {
     this.store.instantanea(`comercio_${etiqueta}`);
 
+    // Un reductor que rechaza (mochila llena, oro que no alcanza) no lanza:
+    // devuelve el estado sin tocar y el `dispatch` sigue. Sin mirar eso, el
+    // oro podía salir y el objeto no entrar. Cada acción TIENE que cambiar el
+    // estado; si una no lo hace, se deshace todo.
     try {
       this.store.transaccion(() => {
-        for (const a of acciones) this.despachar(a.tipo, a.payload);
+        for (const a of acciones) {
+          const antes = this.store.getState();
+          const despues = this.despachar(a.tipo, a.payload);
+          if (despues === antes) throw new Error(`acción rechazada: ${a.tipo}`);
+        }
       });
 
       this.store.descartarInstantanea(`comercio_${etiqueta}`);
+      return true;
     } catch (e) {
       this.store.restaurar(`comercio_${etiqueta}`);
       this.log.error(`transacción de ${etiqueta} revertida`, e);
-      throw e;
+      return false;
     }
   }
 

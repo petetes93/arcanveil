@@ -98,6 +98,8 @@ export class Inventory extends SystemBase {
   _reducirAnadir(estado, accion) {
     const { objeto, silencioso = false } = accion.payload ?? {};
     if (!objeto) return null;
+    // Una cantidad que no es un entero positivo no entra (ni -1, ni 1.5, ni NaN).
+    if (objeto.cantidad !== undefined && !(Number.isInteger(objeto.cantidad) && objeto.cantidad > 0)) return null;
 
     const resultado = this._insertar(estado.inventory, objeto);
     if (!resultado.exito) {
@@ -207,6 +209,8 @@ export class Inventory extends SystemBase {
 
     const objeto = estado.inventory.objetos?.porId?.[idObjeto];
     if (!objeto) return null;
+    // Retirar -1 sumaba una unidad (`cantidad - (-1)`). Solo enteros positivos.
+    if (!(Number.isInteger(cantidad) && cantidad > 0)) return null;
 
     const parche = { inventory: {} };
     const porId = { ...estado.inventory.objetos.porId };
@@ -514,7 +518,9 @@ export class Inventory extends SystemBase {
   /** @private */
   _reducirOro(estado, accion) {
     const { delta = 0, motivo = '' } = accion.payload ?? {};
-    if (delta === 0) return null;
+    // El oro se mueve en enteros finitos: NaN o Infinity dejaban el monedero
+    // roto para el resto de la partida.
+    if (!Number.isInteger(delta) || delta === 0) return null;
 
     const actual = estado.player.oro ?? 0;
 

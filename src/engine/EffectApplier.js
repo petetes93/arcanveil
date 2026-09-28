@@ -177,10 +177,18 @@ export class EffectApplier extends SystemBase {
     // un formato inválido, es que no hay nada que aplicar.
     if (valor === null || valor === undefined) return null;
 
-    if (typeof valor === 'number') return valor;
+    // Todo lo que llega aquí son cantidades de juego: enteros finitos. NaN o
+    // Infinity se descartan (antes pasaban por `typeof 'number'` y dejaban el
+    // recurso roto); un decimal se redondea.
+    const entero = (x) => {
+      if (!Number.isFinite(x)) { ajustes.push(`${clave}: valor no finito descartado`); return null; }
+      return Math.round(x);
+    };
+
+    if (typeof valor === 'number') return entero(valor);
 
     if (valor && typeof valor === 'object') {
-      if (typeof valor.delta === 'number') return valor.delta;
+      if (typeof valor.delta === 'number') return entero(valor.delta);
 
       // Objeto sin delta ni set: campo vacío, se pasa por alto en silencio.
       if (valor.delta === undefined && valor.set === undefined) return null;
@@ -193,7 +201,7 @@ export class EffectApplier extends SystemBase {
           ajustes.push(`${clave}: "set" no admitido para este campo`);
           return null;
         }
-        return valor.set - actual;
+        return entero(valor.set - actual);
       }
     }
 

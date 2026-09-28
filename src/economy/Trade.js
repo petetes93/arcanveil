@@ -38,7 +38,39 @@ export const RECHAZO = Object.freeze({
   MERCADER_SIN_ORO: 'mercader_sin_oro',
   NO_VENDIBLE: 'no_vendible',
   NO_INTERESA: 'no_interesa',
+  CANTIDAD_INVALIDA: 'cantidad_invalida',
+  PRECIO_INVALIDO: 'precio_invalido',
 });
+
+/** Tope de unidades en una sola operación. */
+export const MAX_CANTIDAD = 999;
+
+/**
+ * Una cantidad de comercio: entero, mayor que cero y con tope. Nada de
+ * cadenas, decimales, NaN ni infinitos.
+ *
+ * Antes se aceptaba cualquier cosa: comprar `-1` a precio 5 daba
+ * `posible: true, total: -5`, y el cargo de `-total` se convertía en un
+ * abono de oro.
+ *
+ * @param {*} n
+ * @returns {boolean}
+ */
+export function cantidadValida(n) {
+  return typeof n === 'number' && Number.isInteger(n) && n > 0 && n <= MAX_CANTIDAD;
+}
+
+/** Un precio: entero finito y no negativo. @param {*} p @returns {boolean} */
+export function precioValido(p) {
+  return typeof p === 'number' && Number.isInteger(p) && p >= 0 && Number.isFinite(p);
+}
+
+/** El rechazo común de lo mal formado: sin total, para que nada se mueva. */
+function malFormada(cantidad, precioUnitario) {
+  if (!cantidadValida(cantidad)) return { posible: false, motivo: RECHAZO.CANTIDAD_INVALIDA, mensaje: 'Esa cantidad no vale.', total: 0 };
+  if (!precioValido(precioUnitario)) return { posible: false, motivo: RECHAZO.PRECIO_INVALIDO, mensaje: 'Ese precio no vale.', total: 0 };
+  return null;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    VALIDACIÓN
@@ -59,9 +91,15 @@ export const RECHAZO = Object.freeze({
 export function validarCompra(opciones) {
   const { objeto, cantidad, precioUnitario, jugador, inventario, stock } = opciones;
 
+  const mal = malFormada(cantidad, precioUnitario);
+  if (mal) return mal;
   const total = precioUnitario * cantidad;
 
   // ─── Existencias ────────────────────────────────────────────────────────
+  // Un stock que no es un entero no negativo es un catálogo roto: no se vende.
+  if (stock !== undefined && !(Number.isInteger(stock) && stock >= 0)) {
+    return { posible: false, motivo: RECHAZO.SIN_STOCK, mensaje: 'Ya no le queda.', total: 0 };
+  }
   if (stock !== undefined && stock < cantidad) {
     return {
       posible: false,
@@ -75,7 +113,7 @@ export function validarCompra(opciones) {
 
   // ─── Oro ────────────────────────────────────────────────────────────────
   const oro = jugador.oro ?? 0;
-  if (oro < total) {
+  if (!(Number.isFinite(oro) && oro >= 0) || oro < total) {
     return {
       posible: false,
       motivo: RECHAZO.SIN_ORO,
@@ -111,7 +149,21 @@ export function validarCompra(opciones) {
 export function validarVenta(opciones) {
   const { objeto, cantidad, precioUnitario, mercader } = opciones;
 
+  const mal = malFormada(cantidad, precioUnitario);
+  if (mal) return mal;
   const total = precioUnitario * cantidad;
+
+  // ─── Lo que lleva ───────────────────────────────────────────────────────
+  // Vender más de lo que se lleva se rechaza; antes se recortaba en silencio
+  // y el aviso de venta decía una cantidad que no era.
+  if (!(Number.isInteger(objeto.cantidad) && objeto.cantidad >= cantidad)) {
+    return {
+      posible: false,
+      motivo: RECHAZO.CANTIDAD_INVALIDA,
+      mensaje: `Solo llevas ${Number.isInteger(objeto.cantidad) ? objeto.cantidad : 0}.`,
+      total: 0,
+    };
+  }
 
   // ─── Objetos que no se venden ───────────────────────────────────────────
   if (objeto.esMision) {
@@ -291,9 +343,11 @@ export function ejecutarCompra(opciones) {
     motivo: null,
     mensaje: null,
     total,
+    // Primero entra el objeto y después se cobra: si la mochila no lo admite,
+    // la transacción se deshace antes de tocar el oro (ni cargo ni aviso).
     acciones: [
-      { tipo: 'inventory/oro', payload: { delta: -total, motivo: 'compra' } },
       { tipo: 'inventory/anadir', payload: { objeto: instancia } },
+      { tipo: 'inventory/oro', payload: { delta: -total, motivo: 'compra' } },
     ],
   };
 }
