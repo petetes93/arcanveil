@@ -13,31 +13,46 @@
  * Esto es lo mismo pero con `Cache-Control: no-store`, sin dependencias y con
  * el Node que ya hace falta para empaquetar.
  *
+ * ── Qué sirve y a quién ──────────────────────────────────────────────────
+ *
+ * Antes escuchaba en todas las interfaces y servía CUALQUIER archivo bajo la
+ * raíz del repositorio: `/.gitignore` devolvía 200, y lo mismo habría hecho
+ * con un `.env`, la configuración local de imágenes o sus imágenes privadas.
+ * Impedir `..` evitaba salir de la raíz, no exponer lo que hay dentro.
+ *
+ *   · Escucha en 127.0.0.1. Para jugar desde el móvil en la misma red hay
+ *     que pedirlo (`--lan`), y avisa de lo que eso abre.
+ *   · Solo sirve lo público, por lista: la app, los módulos, estilos,
+ *     assets, el manifiesto, el trabajador de servicio y las láminas de
+ *     `dist/`. Nada que empiece por punto, nada de `tools/`, y solo tipos de
+ *     archivo conocidos.
+ *   · Solo atiende a los `Host` esperados (evita que una web ajena lo use
+ *     con un DNS que apunte a 127.0.0.1).
+ *
  * Uso:
- *   node tools/servir.mjs            → http://localhost:8080
+ *   node tools/servir.mjs                  → http://localhost:8080
  *   node tools/servir.mjs --puerto 9000
+ *   node tools/servir.mjs --lan            → también en la red local (opt-in)
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { resolve, dirname, extname, normalize, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { networkInterfaces } from 'node:os';
+import { resolve, dirname, extname, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const RAIZ = resolve(AQUI, '..');
 
-const argv = process.argv.slice(2);
-const i = argv.indexOf('--puerto');
-const PUERTO = Number(i >= 0 ? argv[i + 1] : '') || 8080;
-
-/** Tipos que hacen falta aquí. Un mapa corto basta: el proyecto no usa más. */
+/** Tipos que hacen falta aquí. Lo que no está en el mapa no se sirve. */
 const TIPOS = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.webp': 'image/webp',
   '.png': 'image/png',
@@ -46,51 +61,122 @@ const TIPOS = {
   '.ttf': 'font/ttf',
 };
 
-const servidor = createServer(async (peticion, respuesta) => {
-  const url = new URL(peticion.url, `http://${peticion.headers.host}`);
-  let ruta = decodeURIComponent(url.pathname);
+/**
+ * Lo público. Carpetas enteras (lo de dentro, salvo lo que empiece por
+ * punto) y archivos sueltos de la raíz. `dist/` solo sus páginas: sus
+ * subcarpetas (capturas de regresión) no.
+ */
+const CARPETAS = ['app/', 'src/', 'styles/', 'assets/'];
+const SUELTOS = new Set(['index.html', 'clasico.html', 'manifest.webmanifest', 'sw.js']);
+const DIST = /^dist\/[^/]+\.html$/;
 
-  if (ruta.endsWith('/')) ruta += 'index.html';
+/**
+ * ¿Se puede servir esta ruta? Recibe la ruta YA decodificada, sin la barra
+ * inicial. Rechaza lo raro antes de mirar la lista: barras invertidas, NUL,
+ * `..`, segmentos vacíos y cualquier segmento que empiece por punto.
+ *
+ * @param {string} ruta
+ * @returns {boolean}
+ */
+export function esPublica(ruta) {
+  if (!ruta || /[\\\0]/.test(ruta) || /^[a-z]:/i.test(ruta)) return false;
+  const segmentos = ruta.split('/');
+  if (segmentos.some((s) => s === '' || s === '.' || s === '..' || s.startsWith('.'))) return false;
+  if (!TIPOS[extname(ruta).toLowerCase()]) return false;
+  return SUELTOS.has(ruta) || DIST.test(ruta) || CARPETAS.some((c) => ruta.startsWith(c));
+}
 
-  // No salir de la raíz. `..` en la URL no debe alcanzar el disco de arriba,
-  // aunque esto solo escuche en local.
-  const destino = resolve(RAIZ, `.${normalize(ruta)}`);
+/** Direcciones IPv4 de la red local, para el modo `--lan`. */
+function direccionesLan() {
+  return Object.values(networkInterfaces()).flat()
+    .filter((i) => i && i.family === 'IPv4' && !i.internal)
+    .map((i) => i.address);
+}
 
-  if (destino !== RAIZ && !destino.startsWith(RAIZ + sep)) {
-    respuesta.writeHead(403).end('fuera de la raíz');
-    return;
-  }
+/**
+ * Crea el servidor (sin escuchar todavía).
+ *
+ * @param {Object} [op]
+ * @param {string} [op.raiz] Por defecto, la del repositorio.
+ * @param {boolean} [op.lan=false] Aceptar `Host` de la red local.
+ * @returns {import('node:http').Server & {hostsPermitidos: Set<string>}}
+ */
+export function crearServidorEstatico({ raiz = RAIZ, lan = false } = {}) {
+  const hostsPermitidos = new Set(['localhost', '127.0.0.1', '[::1]', ...(lan ? direccionesLan() : [])]);
 
-  try {
-    const info = await stat(destino);
-    if (info.isDirectory()) throw new Error('es una carpeta');
+  const servidor = createServer(async (peticion, respuesta) => {
+    const texto = (codigo, cuerpo) => {
+      respuesta.writeHead(codigo, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      respuesta.end(cuerpo);
+    };
 
-    const cuerpo = await readFile(destino);
+    if (!['GET', 'HEAD'].includes(peticion.method)) return texto(405, 'solo lectura');
 
-    // El trabajador de servicio es la única excepción al `no-store`. Chrome
-    // se niega a registrar un `sw.js` servido con `no-store` y falla con un
-    // «unknown error» que no dice nada, así que sin esta rendija la instalación
-    // como aplicación no se puede probar en local. `max-age=0` conserva lo que
-    // importa —nunca se sirve una versión vieja— sin prohibir el registro.
-    const esTrabajador = /(^|\/)sw\.js$/.test(ruta);
+    // El Host sin puerto. Uno que no esperamos no se atiende.
+    const host = String(peticion.headers.host ?? '').replace(/:\d+$/, '').toLowerCase();
+    if (!hostsPermitidos.has(host)) return texto(421, 'host no permitido');
 
-    respuesta.writeHead(200, {
-      'Content-Type': TIPOS[extname(destino)] ?? 'application/octet-stream',
-      // La razón de que este archivo exista.
-      'Cache-Control': esTrabajador ? 'max-age=0, must-revalidate' : 'no-store, must-revalidate',
-    });
+    let ruta;
+    try {
+      ruta = decodeURIComponent(new URL(peticion.url, 'http://localhost').pathname);
+    } catch {
+      return texto(400, 'ruta mal formada');
+    }
+    if (ruta === '/' || ruta.endsWith('/')) ruta += 'index.html';
+    ruta = ruta.replace(/^\/+/, '');
 
-    respuesta.end(cuerpo);
-  } catch {
-    respuesta.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    respuesta.end(`no encontrado: ${ruta}`);
-  }
-});
+    if (!esPublica(ruta)) return texto(404, 'no encontrado');
 
-servidor.listen(PUERTO, () => {
-  console.log(`ARCANVEIL servido en http://localhost:${PUERTO}`);
-  console.log(`  raíz: ${RAIZ}`);
-  console.log('  sin caché: recargar basta para ver los cambios');
-  console.log('\n  app:    /app/index.html');
-  console.log('  lámina: /dist/lamina-arte.html');
-});
+    const destino = resolve(raiz, ...ruta.split('/'));
+    if (!destino.startsWith(raiz + sep)) return texto(404, 'no encontrado');
+
+    try {
+      const info = await stat(destino);
+      if (!info.isFile()) return texto(404, 'no encontrado');
+      const cuerpo = peticion.method === 'HEAD' ? null : await readFile(destino);
+
+      // El trabajador de servicio es la única excepción al `no-store`. Chrome
+      // se niega a registrar un `sw.js` servido con `no-store` y falla con un
+      // «unknown error» que no dice nada, así que sin esta rendija la
+      // instalación como aplicación no se puede probar en local. `max-age=0`
+      // conserva lo que importa —nunca se sirve una versión vieja— sin
+      // prohibir el registro.
+      const esTrabajador = ruta === 'sw.js';
+      respuesta.writeHead(200, {
+        'Content-Type': TIPOS[extname(destino).toLowerCase()],
+        'Cache-Control': esTrabajador ? 'max-age=0, must-revalidate' : 'no-store, must-revalidate',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      respuesta.end(cuerpo ?? undefined);
+    } catch {
+      texto(404, 'no encontrado');
+    }
+  });
+  servidor.hostsPermitidos = hostsPermitidos;
+  return servidor;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LÍNEA DE ÓRDENES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const argv = process.argv.slice(2);
+  const i = argv.indexOf('--puerto');
+  const PUERTO = Number(i >= 0 ? argv[i + 1] : '') || 8080;
+  const lan = argv.includes('--lan');
+  const servidor = crearServidorEstatico({ lan });
+
+  servidor.listen(PUERTO, lan ? '0.0.0.0' : '127.0.0.1', () => {
+    console.log(`ARCANVEIL servido en http://localhost:${PUERTO}`);
+    console.log('  sin caché: recargar basta para ver los cambios');
+    console.log('\n  app:    /app/index.html');
+    console.log('  lámina: /dist/lamina-arte.html');
+    if (lan) {
+      console.log('\n  ⚠ Modo red local: cualquiera en tu red puede abrir la app (solo lo público:');
+      console.log('    app, módulos, estilos y assets; nunca configuración, herramientas ni imágenes privadas).');
+      for (const ip of direccionesLan()) console.log(`    http://${ip}:${PUERTO}/app/index.html`);
+      console.log('    Si el móvil no carga, el cortafuegos de Windows bloquea el puerto: abrirlo es decisión tuya.');
+    }
+  });
+}
