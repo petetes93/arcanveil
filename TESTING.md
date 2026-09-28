@@ -125,7 +125,9 @@ personaje»; al elegir uno solo queda «Comenzar partida».
 |---|---|
 | El dado «Aleatorio» cambia linaje y nombre en cada pulsación | Repite el mismo origen o no cambia el nombre |
 | Nombre, Descripción e Historia se escriben libremente | Algún campo se borra al volver a tirar |
-| La descripción es el encargo del retrato (cicatriz, pelo, ojos se ven) | El retrato ignora la descripción |
+| Sin pedirlo no se pinta nada: se ve el marcador con la inicial y el nombre, y «Pintar retrato» | Aparece una cara o una imagen sin haberla pedido |
+| «Pintar retrato» abre el estudio: la candidata se ve aparte, «Otra versión» pide otra, «Usar esta versión» la pone en la ficha | La candidata sale en la ficha sin elegirla, o «Otra versión» devuelve la misma |
+| Sin generador en el equipo, el estudio dice qué arrancar y no deja pintar | Se queda cargando o da un error sin explicación |
 | Pulsar el nombre o el linaje no abre la ilustración a pantalla completa | Salta la ilustración |
 | «Crear personaje» enseña la ficha revelada con «Crear otro» y «Comenzar partida» | Entra en partida sin revelar |
 | El lugar de partida corresponde al linaje | Un ferrano que empieza en el pantano |
@@ -145,13 +147,13 @@ cambiar algo?». Se corrige escribiendo en la caja de debajo:
 |---|---|
 | Cada corrección responde qué ha cambiado («Ahora es un hombre.», «Añadido: una capa roja.») | «No te he entendido» ante una de estas frases |
 | El nombre, el retrato y la historia se conservan salvo lo que se pidió cambiar | Se pierde el nombre o sale otro personaje en el plantel |
-| El retrato se repinta con lo nuevo (un hombre, la capa) | Sigue con la cara de antes |
+| El retrato elegido se conserva; si ya no se parece, se pinta otro desde el estudio | La corrección borra el retrato elegido o pinta uno sin pedirlo |
 | Si la descripción nombra una especie («enana») distinta del linaje, lo avisa y ofrece cambiarlo | Mezcla rasgos de los dos (cuernos en una enana) |
 | «vale, empezamos» arranca la partida sin buscar el botón | Hay que pulsar «Comenzar partida» |
 | En móvil, el ejemplo de la caja se lee entero y en letra normal | Sale en versalitas grandes y cortado |
 
 ```js
-ARCANVEIL.ver('player')        // nombre, raza, clase, lore, retrato, genero, semillaRetrato
+ARCANVEIL.ver('player')        // nombre, raza, clase, lore, retrato, genero
 ARCANVEIL.ver('world.ubicacion')
 ```
 

@@ -62,7 +62,7 @@ El arte viaja dentro: son unos kilobytes de código, no megas de imágenes.
 
 ## Pruebas
 
-La regresión web automatizada no necesita dependencias: arranca Chrome, recorre la portada, tira el generador aleatorio, crea un personaje con descripción e historia, comprueba que el retrato interpreta sus rasgos y que el canon abre hilos de campaña, juega 20 turnos, vigila la gramática de acciones libres y verifica la recarga offline.
+La regresión web automatizada no necesita dependencias: arranca Chrome, recorre la portada, tira el generador aleatorio, crea un personaje con descripción e historia, comprueba que sin pedirlo no se pinta nada y que el estudio pinta, ofrece otra versión y guarda la elegida (con un puente de imagen de verdad y un proveedor falso), que la elegida sigue sin red tras recargar y que la página no pide nada fuera del equipo, que el canon abre hilos de campaña, juega 20 turnos, vigila la gramática de acciones libres y verifica la recarga offline.
 
 ```bash
 node tools/regresion-app.mjs --desktop --capturas

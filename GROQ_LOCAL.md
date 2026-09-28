@@ -27,7 +27,7 @@ node tools/iniciar-groq.mjs
 2. Te pide la clave **sin eco**: no se ve al pegarla ni al teclearla, no queda en el historial de la terminal y no se escribe en disco. Si la entrada no es una terminal (una tubería, un fichero), se niega.
 3. Arranca el puente en `http://127.0.0.1:11436` y la app en `http://localhost:8080`. La app corre en un proceso aparte que **no** hereda la clave.
 
-Abre **`http://localhost:8080/app/index.html`**. Tiene que ser `localhost` y no `127.0.0.1`: el puente solo atiende al origen exacto de la app.
+Abre **`http://localhost:8080/app/index.html`** (o `http://127.0.0.1:8080/app/index.html`: el puente acepta los dos nombres de tu equipo con ese puerto, y nada más). Si «Probar conexión» falla, dice por qué: no hay puente, contesta otro programa, el puente se arrancó para otra dirección, Groq no acepta la clave, cuota o ritmo, o el modelo no está en la cuenta. Con el puerto ocupado, `iniciar-groq` lo dice antes de pedir la clave.
 
 En el juego: **Narrador › IA Groq**. Pulsa **Probar conexión**: pide la lista de modelos, no genera nada ni envía la partida, y comprueba que quien contesta es de verdad el puente de ARCANVEIL (a otra dirección no se le envía nada). Luego lee qué se envía, marca la casilla y pulsa **Usar IA Groq**. Desmarcar la casilla corta el envío en el acto.
 
