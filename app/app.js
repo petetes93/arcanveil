@@ -89,8 +89,9 @@ function el(tag, attrs = {}, ...hijos) {
     if (v === null || v === undefined || v === false) continue;
     if (k === 'class') n.className = v;
     else if (k === 'text') n.textContent = String(v);
-    else if (k === 'html') n.innerHTML = v;
-    else if (k.startsWith('on')) n.addEventListener(k.slice(2).toLowerCase(), v);
+    // Sin `html`: nadie lo usaba, y una puerta a innerHTML en el ayudante de
+    // todo app.js es la que acaba abriéndose con texto del narrador.
+    else if (k.startsWith('on')) { if (typeof v === 'function') n.addEventListener(k.slice(2).toLowerCase(), v); }
     else if (k === 'dataset') Object.assign(n.dataset, v);
     // `value` va como propiedad. Como atributo, un <textarea> lo ignora: la
     // descripción y la historia salían vacías al volver a la ficha aunque el

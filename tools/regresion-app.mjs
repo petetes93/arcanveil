@@ -366,6 +366,35 @@ try {
   if (turns.at(-1).lines < 20) throw new Error(`la bitácora no avanzó: ${turns.at(-1).lines}`);
   await shot(`03-partida-20-turnos-${viewport.label}.png`);
 
+  // Texto hostil por todas las puertas que acaban en pantalla: el nombre y el
+  // oficio de un PNJ (y su retrato), lo que escribe el jugador, una línea
+  // narrada, un aviso y un objeto. Nada de eso puede ejecutarse ni volverse
+  // etiqueta: todo va como texto (ver auditar-xss.mjs para el código).
+  const CEBO = '<img src=x onerror="window.__xss=(window.__xss||0)+1"><svg onload="window.__xss=(window.__xss||0)+1"></svg>';
+  await evaluate(`(async () => {
+    window.__xss = 0;
+    const cebo = ${JSON.stringify(CEBO)};
+    ARCANVEIL.sistema('npcs').introducir({ nombre: 'Cebo' + cebo, rol: 'mercader' + cebo, actitud: 'amable' });
+    ARCANVEIL.bus.emit('narrative:direct', { texto: 'Narrado ' + cebo, voz: 'dm' });
+    ARCANVEIL.bus.emit('narrative:direct', { texto: cebo, voz: 'system' });
+    ARCANVEIL.bus.emit('ui:notice', { mensaje: 'Aviso ' + cebo, tipo: 'info' });
+    ARCANVEIL.store.dispatch('inventory/anadir', { silencioso: true, objeto: {
+      id: 'itm_cebo', refId: 'pocion_curacion', nombre: 'Cebo' + cebo, categoria: 'consumible', subtipo: 'pocion',
+      rareza: 'comun', cantidad: 1, peso: 0.5, valor: 1, afijos: [], equipado: false, ranura: null, origen: { tipo: 'desconocido' } } });
+    await ARCANVEIL.jugar('le digo al mercader: ' + cebo);
+  })()`);
+  await wait(900);
+  const xss = await evaluate(`({ ejecutado: window.__xss, etiquetas: document.querySelectorAll('img[src="x"], svg[onload], [onerror]').length, visible: document.body.textContent.includes('onerror') })`);
+  if (xss.ejecutado || xss.etiquetas) throw new Error(`texto hostil convertido en HTML: ${JSON.stringify(xss)}`);
+  if (!xss.visible) throw new Error('el texto hostil no aparece como texto en ninguna parte: la prueba no ha llegado a pintarlo');
+  // Control: el mismo cebo metido como HTML sí se dispara. Si no, la prueba
+  // de arriba no demostraba nada.
+  await evaluate(`(() => { const d = document.createElement('div'); d.id = 'control-xss'; d.hidden = true; d.innerHTML = ${JSON.stringify(CEBO)}; document.body.append(d); })()`);
+  await wait(400);
+  const control = await evaluate(`(() => { const n = window.__xss; document.getElementById('control-xss')?.remove(); window.__xss = 0; return n; })()`);
+  if (!control) throw new Error('el cebo no se dispara ni metido como HTML: la prueba de XSS no mide nada');
+  await evaluate(`(() => { const n = ARCANVEIL.sistema('npcs'); const id = ARCANVEIL.ver('npcs.presentes', []).find((i) => /Cebo/.test(ARCANVEIL.ver('npcs.conocidos.porId.' + i + '.nombre') ?? '')); if (id) n.retirar?.(id); ARCANVEIL.store.dispatch('inventory/retirar', { idObjeto: 'itm_cebo' }); })()`);
+
   // El grupo: reclutar a alguien de la escena, viajar con él, pelear juntos
   // y verlo en el parte.
   await evaluate(`(() => {

@@ -1,6 +1,6 @@
 // Generado por tools/generar-sw.mjs. No editar a mano.
 // La lista se recorre del disco: un archivo nuevo entra solo al regenerar.
-const CACHE = 'arcanveil-u6qpg3';
+const CACHE = 'arcanveil-19obh1k';
 const SHELL = [
   './manifest.webmanifest',
   './app/app.js',

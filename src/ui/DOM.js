@@ -9,8 +9,9 @@
  *
  * Regla de seguridad que atraviesa todo el archivo: el texto se inserta SIEMPRE
  * con textContent, nunca con innerHTML. El director de juego produce texto
- * arbitrario y no fiable; si en algún momento hiciera falta HTML, hay una
- * función explícita (`crudo`) cuyo nombre delata lo que se está haciendo.
+ * arbitrario y no fiable. No hay puerta para HTML literal: `crudo` existía
+ * sin que nadie la usara y se quitó (tools/auditar-xss.mjs vigila que no
+ * vuelva ninguna).
  *
  * Dependencias: config/ui.config.js.
  * ═══════════════════════════════════════════════════════════════════════════
@@ -208,19 +209,6 @@ export function icono(clave, props = {}) {
   }
 
   return svg;
-}
-
-/**
- * Inserta HTML literal. Deliberadamente incómodo de nombre: no debe usarse con
- * nada que provenga del director de juego ni de un guardado.
- *
- * @param {string} html Cadena controlada por el propio código.
- * @returns {DocumentFragment}
- */
-export function crudo(html) {
-  const plantilla = document.createElement('template');
-  plantilla.innerHTML = html;
-  return plantilla.content;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -490,7 +478,7 @@ export function atraparFoco(contenedor) {
 }
 
 export default {
-  h, añadir, fragmento, icono, crudo,
+  h, añadir, fragmento, icono,
   qs, qsa, montaje, porRuta,
   vaciar, reemplazar, clase, visible, atributo, texto,
   on, delegar,
