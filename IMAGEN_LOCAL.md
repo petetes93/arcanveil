@@ -22,7 +22,8 @@ Abre ARCANVEIL normalmente. Al escribir al menos 8 caracteres en la descripción
 
 Variables opcionales:
 - `COMFY_URL`: dirección de ComfyUI. Predeterminada `http://127.0.0.1:8188`.
-- `ARCANVEIL_IMAGE_PORT`: puerto del puente. Predeterminado `11436`.
+- `ARCANVEIL_IMAGE_PORT`: puerto del puente. Predeterminado `11437` (el `11436` es del puente de Groq).
+- `ARCANVEIL_ORIGIN`: origen exacto de la app. Predeterminado `http://localhost:8080`. El puente rechaza cualquier otro origen y cualquier `Host` que no sea de loopback antes de generar nada.
 - `ARCANVEIL_IMAGE_MODEL`: nombre exacto del checkpoint instalado.
 
 Todo ocurre en loopback y en el PC. No hay claves, cuenta, API remota ni coste por imagen.

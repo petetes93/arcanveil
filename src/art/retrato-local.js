@@ -3,7 +3,8 @@
  * La web nunca contiene un modelo ni una clave: habla solo con loopback. Si el
  * servicio no está levantado, el SVG procedural que ya está pintado permanece.
  */
-const ORIGEN = 'http://127.0.0.1:11436';
+// Puerto propio: el 11436 es del puente de Groq (ver tools/imagen-local-proxy.mjs).
+const ORIGEN = 'http://127.0.0.1:11437';
 const ESPERA_ESCRITURA = 850;
 const pendientes = new WeakMap();
 
@@ -46,14 +47,14 @@ export function mejorarRetratoLocal(nodo, personaje = {}) {
     if (Date.now() < ausenteHasta) return;
     avisar(nodo, 'generando');
     try {
-      const respuesta = await fetch(`${ORIGEN}/v1/portrait`, {
+      const respuesta = await fetch(`${ORIGEN}/v1/candidata`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          lineage: personaje.raza ?? 'valdes',
-          name: personaje.nombre ?? '',
-          description: descripcion,
-          seed: actual,
+          tipo: 'personaje',
+          clave: `pj:${String(personaje.id ?? personaje.nombre ?? 'x').replace(/[^\w:.-]/g, '').slice(0, 60) || 'x'}`,
+          linaje: personaje.raza ?? 'valdes',
+          descripcion: descripcion.slice(0, 300),
         }),
       });
       if (nodo.dataset.firmaRetratoLocal !== actual) return;
