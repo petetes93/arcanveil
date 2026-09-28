@@ -29,6 +29,9 @@
  *   · secuela — lo que pasa después, causado por cómo terminó: otra
  *     situación, con los mismos implicados si `hereda` lo dice.
  *   · lugares — solo en estos sitios (el peaje necesita un puente).
+ *   · sugerencia / sugerencias — lo que se le propone al jugador, sacado de
+ *     sus vías (el texto casa con su patrón). `tras: 'detalle'`: solo cuando
+ *     ya lo ha visto de cerca. `tema`: de qué se le puede preguntar a alguien.
  *   · sitio — dónde están sus implicados, dicho como se diría («en la garita
  *     del puente»). Sirve para decir quién hay y dónde sin inventar posiciones
  *     que el motor no tiene.
@@ -42,6 +45,8 @@
  * @typedef {Object} ViaSituacion
  * @property {string} clave
  * @property {RegExp} patron Sobre el texto del jugador, sin tildes y en minúscula.
+ * @property {string} [contra] Clave del actor al que va dirigida; si lo
+ *   escrito nombra a otro de la escena y no a este, la vía no se toma.
  * @property {string} habilidad
  * @property {string} umbral
  * @property {string} exito
@@ -99,6 +104,11 @@ export const SITUACIONES = Object.freeze({
       testimonio: { carretero: '{carretero} se limpia las manos en el pantalón. «Me volcaron el carro entre tres. Media carga al barro, y a ver quién me la paga.»' },
     },
     sugerencia: { label: 'Echar una mano con el carro', intent: 'custom' },
+    tema: 'el carro atascado',
+    sugerencias: [
+      { label: 'Ayudar a {carretero} a calzar la rueda', intent: 'custom' },
+      { label: 'Pedirle calma a {guardia}', intent: 'talk' },
+    ],
   },
 
   colgante_en_el_pozo: {
@@ -149,6 +159,12 @@ export const SITUACIONES = Object.freeze({
       testimonio: { nina: '{nina} se mira las rodillas raspadas. «Quise bajar yo. La cuerda no llegaba.»' },
     },
     sugerencia: { label: 'Acercarte a la niña del pozo', intent: 'talk' },
+    tema: 'el colgante del pozo',
+    sugerencias: [
+      { label: 'Tranquilizar a {nina}', intent: 'talk' },
+      { label: 'Pescar el colgante con el cubo', intent: 'custom', tras: 'detalle' },
+      { label: 'Bajar al pozo por la cuerda', intent: 'custom', tras: 'detalle' },
+    ],
     secuela: { tras: 3, refId: 'madre_agradece', cuando: 'resuelta', hereda: { nina: 'nina' } },
   },
 
@@ -180,7 +196,7 @@ export const SITUACIONES = Object.freeze({
         fracaso: 'Un gato salta de un barril a tu paso. La figura gira la cabeza hacia ti y se aparta del alero sin prisa, como quien ya ha visto suficiente.',
       },
       {
-        clave: 'enfrentar', patron: /baja|grit|le llamo|enfrent|amenaz|subo al tejado/,
+        clave: 'enfrentar', patron: /baja|grit|le llamo|enfrent|amenaz|subo al tejado/, contra: 'vigia',
         habilidad: 'intimidacion', umbral: 'moderada', resuelveSiExito: true,
         exito: 'Tu voz corta la calle. La figura se incorpora, duda un instante y desaparece por el otro lado del tejado. Hoy no habrá robo.',
         fracaso: 'La figura te mira desde arriba y no se mueve. Luego se lleva un dedo a los labios.',
@@ -201,6 +217,12 @@ export const SITUACIONES = Object.freeze({
       testimonio: { mercader: '{mercader} señala el mostrador vacío. «Me han quitado la bolsa delante de las narices. Ni lo vi venir.»' },
     },
     sugerencia: { label: 'Fijarte en la figura del tejado', intent: 'observe' },
+    tema: 'la figura del tejado',
+    sugerencias: [
+      { label: 'Avisar a {mercader} de que le vigilan', intent: 'talk', tras: 'detalle' },
+      { label: 'Seguir a la figura sin que te vea', intent: 'observe', tras: 'detalle' },
+      { label: 'Gritarle a la figura que baje', intent: 'talk', tras: 'detalle' },
+    ],
   },
 
   balanza_trucada: {
@@ -241,6 +263,11 @@ export const SITUACIONES = Object.freeze({
       testimonio: { tendero: '{tendero} se encoge de hombros. «Se ha ido con medio saco. La balanza es buena, diga lo que diga.»' },
     },
     sugerencia: { label: 'Mirar de cerca la balanza', intent: 'observe' },
+    tema: 'la balanza',
+    sugerencias: [
+      { label: 'Comprobar la balanza con un peso conocido', intent: 'custom', tras: 'detalle' },
+      { label: 'Mediar entre {tendero} y {clienta}', intent: 'talk' },
+    ],
   },
 
   cabra_escapada: {
@@ -280,6 +307,11 @@ export const SITUACIONES = Object.freeze({
       testimonio: { pastor: '{pastor} tira de la cuerda con rabia. «Medio huerto. Me quedo sin el jornal del mes.»' },
     },
     sugerencia: { label: 'Ir a por la cabra', intent: 'custom' },
+    tema: 'la cabra',
+    sugerencias: [
+      { label: 'Cortarle el paso a la cabra', intent: 'custom' },
+      { label: 'Atraer a la cabra con un poco de pan', intent: 'custom' },
+    ],
   },
 
   buhonero_herido: {
@@ -319,6 +351,11 @@ export const SITUACIONES = Object.freeze({
       marchan: ['buhonero'],
     },
     sugerencia: { label: 'Acercarte al buhonero herido', intent: 'talk' },
+    tema: 'el buhonero herido',
+    sugerencias: [
+      { label: 'Curarle el tobillo a {buhonero}', intent: 'custom' },
+      { label: 'Buscar las huellas de la mula', intent: 'search' },
+    ],
   },
 
   /* ─── Negociar o pelear ───────────────────────────────────────────────── */
@@ -385,6 +422,11 @@ export const SITUACIONES = Object.freeze({
       pulsos: [{ tras: 2, texto: '{arriero} ha empezado a desatar la manta de la mula para ofrecerla. {cobrador} ni la mira.' }],
     },
     sugerencia: { label: 'Mirar la tabla del peaje', intent: 'observe' },
+    tema: 'lo que cobran en el peaje',
+    sugerencias: [
+      { label: 'Decirle a {cobrador} que cobre lo justo', intent: 'talk', tras: 'detalle' },
+      { label: 'Pagar lo que le falta a {arriero}', intent: 'custom', tras: 'detalle' },
+    ],
   },
 
   /* ─── Secuelas: solo como consecuencia de otra ───────────────────────── */
@@ -424,6 +466,10 @@ export const SITUACIONES = Object.freeze({
       hecho: 'La guardia preguntó por el robo del mercado sin sacar nada en claro.',
     },
     sugerencia: { label: 'Contarle lo que viste', intent: 'talk' },
+    tema: 'el robo de la bolsa',
+    sugerencias: [
+      { label: 'Decirle a {guardia} que no viste nada', intent: 'talk' },
+    ],
   },
 
   madre_agradece: {
@@ -455,6 +501,10 @@ export const SITUACIONES = Object.freeze({
       hecho: 'La madre de {nina} vino a darte las gracias.',
     },
     sugerencia: { label: 'Hablar con la madre', intent: 'talk' },
+    tema: 'lo del pozo',
+    sugerencias: [
+      { label: 'Aceptar su agradecimiento', intent: 'talk' },
+    ],
   },
 });
 

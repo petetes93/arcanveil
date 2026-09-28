@@ -66,7 +66,7 @@ const PREPARA = /^(?:me acerco|me aproximo|vuelvo|regreso|voy (?:hacia|con|junto
 
 const OMISION = /^(?:ignoro|paso de|no hago caso|sin hacer caso|me desentiendo|dejo (?:estar|en paz|atras)|no me meto)\b/;
 const ESPERA = /^(?:espero|aguardo|me quedo esperando|me quedo quiet[oa]|no hago nada|observo(?: en silencio)?)\s*[.!]?$/;
-const HABLA = new RegExp(`^(?:${CLITICO}\\s+)?(?:digo|pregunto|cuento|explico|contesto|respondo|grito|susurro|suplico|exijo|pido|advierto|aviso)\\b`);
+const HABLA = new RegExp(`^(?:${CLITICO}\\s+)?(?:digo|pregunto|cuento|explico|contesto|respondo|grito|susurro|suplico|exijo|pido|advierto|aviso)\\b|^(?:hablo|charlo|converso)\\s+(?:un rato\\s+)?con\\b`);
 const NEGATIVA = /\b(?:me niego|no acepto|no pienso|no voy a|no (?:os|te|le|les)\s+(?:entregar|dar|vender|dejar|devolver)\w*|no (?:entregar|dar|vender|dejar|devolver)\w*|no (?:lo|la|los|las) (?:hare|har[eé]|dare|dar[eé]|entregare|entregar[eé])|jamas|ni hablar|ni loco|ni loca)\b/;
 const DELEGA = /^(?:que|dejo que|deja que)\s+(mi compañer[oa]|mi amig[oa]|[A-ZÁÉÍÓÚÑ][\p{L}]+)\s+(.+)$/iu;
 /**
@@ -264,7 +264,9 @@ function clasificar(texto) {
   CITA.lastIndex = 0;
 
   // Habla sin comillas: se conserva literal para no reescribir sus palabras.
-  if (A_TI.test(sinCitas) && !/^(?:me|nos)\s/.test(sinCitas)) {
+  // Un infinitivo con «-te» al principio («Relajarte un rato») es una acción
+  // escrita como sugerencia, no algo dicho a alguien.
+  if (A_TI.test(sinCitas) && !/^(?:me|nos)\s/.test(sinCitas) && !/^\p{L}+(?:ar|er|ir)(?:te|se)\b/u.test(sinCitas)) {
     return { ...base, tipo: TIPO_SEGMENTO.DIALOGO, citaImplicita: true };
   }
 

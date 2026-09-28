@@ -533,7 +533,9 @@ export function interpretar(texto, contexto = {}) {
   // tiraba: salía «No cuela», como si hubiera algo que ceder. Se habla, sin
   // dado; lo que siente quien lo recibe lo pone quien narra.
   const acto = actoDeHabla(original);
-  if (acto?.acto === ACTO.OFRECER) {
+  // Encararse con alguien tampoco es un ataque ni un regateo: es tensión, y
+  // la reacción la pone quien lo recibe (ver `ProceduralProvider`).
+  if (acto?.acto === ACTO.OFRECER || acto?.acto === ACTO.ENFRENTAR) {
     return { ...base, tipo: 'talk', habilidad: 'trato_social', requiereTirada: false, acto, objetivo: extraerObjetivo(original), confianza: 0.8 };
   }
 

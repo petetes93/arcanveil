@@ -323,6 +323,12 @@ export function crearNarrativa() {
     entradas: [],
     /** Opciones ofrecidas en el turno actual. */
     opciones: [],
+    /**
+     * Sugerencias ya usadas y la huella de la escena cuando se usaron. No se
+     * vuelven a ofrecer mientras la escena no cambie.
+     * @type {Array<{k: string, h: string}>}
+     */
+    sugerenciasUsadas: [],
     /** Última acción enviada por el jugador. */
     ultimaAccion: null,
     /** Historial de acciones escritas, para recuperarlas con Ctrl+↑. */

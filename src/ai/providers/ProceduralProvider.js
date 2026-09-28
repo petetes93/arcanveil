@@ -38,6 +38,8 @@ import { ruta as rutaMapa } from '../../world/MapGraph.js';
 import { horasDichas } from '../narrador/Conocimiento.js';
 import { actoDeHabla, ACTO } from '../../engine/ActoDeHabla.js';
 import { separarVocativo } from '../../engine/Segmentos.js';
+import { intento } from '../../engine/Infinitivo.js';
+import { COTAS_IA } from '../../config/balance.config.js';
 
 const minuscula = (t) => seguirFrase(t);
 
@@ -184,10 +186,24 @@ export class ProceduralProvider extends IDMProvider {
     const accion = String(peticion.accion ?? '').trim();
 
     if (accion) {
-      let frase = this._ecoDirecto(accion, ctx) ?? capitalizar(aSegundaPersona(accion)).replace(/[.!?…]*$/u, '.');
+      const directo = this._ecoDirecto(accion, ctx);
+      let frase = directo ?? capitalizar(aSegundaPersona(accion)).replace(/[.!?…]*$/u, '.');
+      // Un intento que falla o que es imposible no se cuenta como hecho:
+      // «Saltas 100 metros hasta el tejado» y después que no. Se narra el
+      // intento, «Intentas saltar…», y el resultado lo pone la tirada.
+      // Mirar o buscar sí se hace aunque falle la tirada: lo que decide es
+      // cuánto se ve, no si se mira. «Intentas mirar el cielo» sobraba.
+      const mirar = ['observe', 'search'].includes(peticion.intencion?.tipo);
+      const fallido = peticion.ambicion === 'desmedida' || (peticion.tirada && !peticion.tirada.exito && !mirar);
+      const conativo = !directo && fallido ? intento(accion) : null;
+      if (conativo) frase = capitalizar(aSegundaPersona(conativo));
       // Lo desmedido se narra como intento, con el límite dentro de la historia.
+      // El intento va solo y el límite justo detrás: lo primero del relato
+      // ya no es un resultado de tirada, y pegado al intento salía «Intentas
+      // saltar 50 metros. La mañana está entrada…» antes de saber qué pasa.
       if (peticion.ambicion === 'desmedida') {
-        frase = `${frase.replace(/\.$/, '')}: esa es tu intención, y la empuñas con todo lo que tienes.`;
+        if (!conativo) frase = `${frase.replace(/\.$/, '')}: esa es tu intención, y la empuñas con todo lo que tienes.`;
+        parrafos.unshift('');
         parrafos.splice(1, 0, this._unico([
           'Pero el mundo es más grande que tus fuerzas. El impulso se quiebra a medio camino y te deja jadeando, con los brazos temblando y la certeza de que aún no eres quien necesitas ser para algo así.',
           'Durante un instante parece posible. Luego la realidad pesa más que tu voluntad: el golpe se pierde, el eco se apaga y solo queda tu respiración, rápida, y las miradas de quien lo haya visto.',
@@ -202,7 +218,10 @@ export class ProceduralProvider extends IDMProvider {
       // «Pones tierra de por medio.» se sustituía por el eco y se perdía.
       // Y el resultado de una tirada tampoco: «Lo consigues a duras penas» es
       // lo que ha pasado, y se perdía detrás de «Intentas trepar al tejado».
-      const plantilla = !ctx.situacionResultado && !peticion.tirada && primera.length < 60 && !primera.includes('«');
+      // En un diálogo, lo primero es lo que hace o dice quien te escucha:
+      // «Dalvane asiente y vuelve a lo suyo» era corto y sin comillas, y se
+      // perdía detrás de «Le dices a Dalvane: «Déjame en paz»».
+      const plantilla = peticion.tipo !== 'dialogo' && !ctx.situacionResultado && !peticion.tirada && primera.length < 60 && !primera.includes('«');
       parrafos[0] = plantilla ? frase : `${frase} ${primera}`.trim();
     }
 
@@ -214,7 +233,9 @@ export class ProceduralProvider extends IDMProvider {
     // Enterrar el encuentro bajo dos párrafos de ambiente lo convierte en una
     // nota al pie de algo que no está pasando.
     const escena = this._narrarEscena(ctx);
-    if (escena) parrafos.splice(1, 0, escena);
+    // Tras un imposible, primero dónde acaba el intento y después la escena:
+    // metida en medio, parecía que la escena reaccionaba al salto.
+    if (escena) parrafos.splice(peticion.ambicion === 'desmedida' ? 2 : 1, 0, escena);
 
     // Lo que nombró y aquí no hay: se dice, justo detrás de lo que sí hizo.
     for (const a of [...(ctx.aclaraciones ?? [])].reverse()) parrafos.splice(1, 0, a);
@@ -363,7 +384,7 @@ export class ProceduralProvider extends IDMProvider {
         antesala: !golpe && Boolean(escena) && this._antesalaLibre(turnoActual),
         elegir: (lista) => this._unico(lista),
       }),
-      choices: this._sugerenciasDeEscena(ctx, r.choices ?? []),
+      choices: this._sugerenciasDeEscena(ctx, r.choices ?? [], turnoActual),
     };
   }
 
@@ -372,9 +393,10 @@ export class ProceduralProvider extends IDMProvider {
    * un rincón del lugar y el hilo personal del jugador.
    * @private
    */
-  _sugerenciasDeEscena(ctx, base) {
+  _sugerenciasDeEscena(ctx, base, turno = ctx.turno ?? 0) {
     const lugar = obtenerLugar(ctx.mundo?.ubicacion);
-    const npc = ctx.npcsPresentes?.[0];
+    const presentes = (ctx.npcsPresentes ?? []).filter((n) => n?.nombre);
+    const sit = ctx.situacion;
 
     const candidatas = [];
 
@@ -383,37 +405,78 @@ export class ProceduralProvider extends IDMProvider {
     // («Preguntar a Torlin por tu padre», «Enseñar el medallón»): la ayuda
     // para cuando no se sabe qué hacer empujaba otra vez hacia su biografía.
     // El pasado vuelve cuando él lo busca; no se le propone.
-    if (ctx.situacion?.sugerencia) candidatas.push(ctx.situacion.sugerencia);
+    //
+    // De lo que está pasando: primero mirarlo; cuando ya se ha visto de
+    // cerca, lo que se puede hacer con ello (sus vías). Antes era siempre la
+    // misma sugerencia, turno tras turno.
+    const deLaSituacion = [];
+    if (sit) {
+      if (!sit.detalleVisto && sit.sugerencia) deLaSituacion.push(sit.sugerencia);
+      deLaSituacion.push(...(sit.sugerencias ?? []));
+    }
 
-    if (npc?.nombre) {
-      candidatas.push({ label: `Hablar con ${npc.nombre}`, intent: 'talk', risk: 'low' });
-      candidatas.push({ label: `Observar a ${npc.nombre} sin que lo note`, intent: 'observe', risk: 'low' });
+    // Con quien ya se está hablando se propone de QUÉ hablar, no otro
+    // «Hablar con…»: se sugirió «Hablar con Cordor» cinco veces seguidas.
+    const deLaCharla = [];
+    const conexion = this._flujo().elegir(lugar?.conexiones ?? []);
+    const destino = conexion ? obtenerLugar(conexion.hasta) : null;
+    // A quien se habla en ESTE turno cuenta ya: si no, los temas llegaban un
+    // turno tarde.
+    const ahora = ctx.destinatario?.id ? presentes.find((n) => n.refId === ctx.destinatario.id) : null;
+    const charla = ahora ?? presentes
+      .filter((n) => Number.isFinite(n.ultimoEncuentro) && turno - n.ultimoEncuentro <= 3)
+      .sort((a, b) => b.ultimoEncuentro - a.ultimoEncuentro)[0];
+    if (charla) {
+      const esSuyo = (sit?.actores ?? []).some((a) => a.refId && a.refId === charla.refId);
+      // Con su nombre si cabe en el botón; si no, «Preguntarle por…», que va
+      // a quien se está hablando.
+      const porTema = (tema) => {
+        const largo = `Preguntar a ${charla.nombre} por ${tema}`;
+        return largo.length <= COTAS_IA.etiquetaOpcionMax ? largo : `Preguntarle por ${tema}`;
+      };
+      if (sit?.tema && !esSuyo) deLaCharla.push({ label: porTema(sit.tema), intent: 'talk', risk: 'low' });
+      deLaCharla.push({ label: `Preguntar a ${charla.nombre} qué se cuenta aquí`, intent: 'talk', risk: 'low' });
+      if (destino?.nombre) deLaCharla.push({ label: `Preguntar a ${charla.nombre} por ${destino.nombre.replace(/^(El|La|Los|Las)\s/, (a) => a.toLowerCase())}`, intent: 'talk', risk: 'low' });
+    } else if (presentes.length) {
+      // Alguien con quien aún no se ha hablado, antes que el de siempre.
+      const nuevo = presentes.find((n) => !Number.isFinite(n.ultimoEncuentro)) ?? presentes[turno % presentes.length];
+      candidatas.push({ label: `Hablar con ${nuevo.nombre}`, intent: 'talk', risk: 'low' });
     }
 
     const sub = this._flujo().elegir(lugar?.sublugares ?? []);
     if (sub?.nombre) candidatas.push({ label: `Ir ${trasPreposicion('a', sub.nombre)}`, intent: 'explore', risk: 'low' });
-
-    const conexion = this._flujo().elegir(lugar?.conexiones ?? []);
-    const destino = conexion ? obtenerLugar(conexion.hasta) : null;
     if (destino?.nombre) candidatas.push({ label: `Tomar el camino ${trasPreposicion('hacia', destino.nombre)}`, intent: 'travel', risk: conexion.peligro > 1 ? 'medium' : 'low' });
 
     // Lo que el jugador ha nombrado jugando, al final: es suyo, pero no se le
     // empuja hacia ello.
+    const quien = charla ?? presentes[0];
     const suyo = (ctx.canon ?? []).filter((c) => c.menciones >= 2 && c.origen !== 'importado');
     for (const c of suyo.slice(0, 1)) {
-      if (c.tipo === 'persona' && npc?.nombre) candidatas.push({ label: `Preguntar a ${npc.nombre} por ${c.nombre}`, intent: 'talk', risk: 'low' });
+      if (c.tipo === 'persona' && quien?.nombre) candidatas.push({ label: `Preguntar a ${quien.nombre} por ${c.nombre}`, intent: 'talk', risk: 'low' });
     }
 
     candidatas.push(...base);
 
+    // Lo que está pasando y la conversación, alternados: si se habla con
+    // alguien, entre las tres visibles hay al menos un tema para él.
+    const alternadas = [];
+    for (let i = 0; i < Math.max(deLaSituacion.length, deLaCharla.length); i += 1) {
+      if (deLaSituacion[i]) alternadas.push(deLaSituacion[i]);
+      if (deLaCharla[i]) alternadas.push(deLaCharla[i]);
+    }
+    candidatas.unshift(...alternadas);
+
+    // Hasta seis: el motor quita las ya usadas sin que haya cambiado nada
+    // (ver `TurnResolver._fijarOpciones`) y la app enseña tres. Una etiqueta
+    // más larga que el botón no se recorta a media frase: no se ofrece.
     const vistas = new Set();
     const elegidas = [];
     for (const c of candidatas) {
       const clave = c.label?.toLowerCase();
-      if (!clave || vistas.has(clave) || c.label.split(/\s+/).length > 9) continue;
+      if (!clave || vistas.has(clave) || c.label.length > COTAS_IA.etiquetaOpcionMax) continue;
       vistas.add(clave);
       elegidas.push(c);
-      if (elegidas.length === 3) break;
+      if (elegidas.length === 6) break;
     }
     return elegidas.map((o, i) => ({ ...o, id: `c${i + 1}` }));
   }
@@ -472,7 +535,10 @@ export class ProceduralProvider extends IDMProvider {
       parrafos.push(mirada.lineas.join(' '));
       memoria.push(...mirada.memoria);
     } else if (peticion.tirada) {
-      parrafos.push(this._narrarResultado(peticion.tirada, peticion.intencion));
+      // Un imposible no se queda «a un poco»: el límite lo cuenta `_enriquecer`
+      // («Pero el mundo es más grande que tus fuerzas…»). «Te falta un poco»
+      // detrás de un salto de 50 metros decía lo contrario.
+      if (!peticion.tirada.desmedida) parrafos.push(this._narrarResultado(peticion.tirada, peticion.intencion));
       // Lo que se ve desde donde quería llegar, solo si ha llegado.
       if (ctx.detalleEscena && peticion.tirada.exito) parrafos.push(ctx.detalleEscena);
     } else if (peticion.accion) {
@@ -480,8 +546,9 @@ export class ProceduralProvider extends IDMProvider {
     }
 
     // Lo que la acción nombra y está aquí se ve: «corro hacia el puente»,
-    // «bebo agua del río». Una vez, no cada turno.
-    const nombrado = !mirada && !ctx.situacionResultado ? this._rasgoNombrado(peticion, ctx) : null;
+    // «bebo agua del río». Una vez, no cada turno. Tras un imposible, no: el
+    // tejado que no alcanzó no se describe como si estuviera allí.
+    const nombrado = !mirada && !ctx.situacionResultado && peticion.ambicion !== 'desmedida' ? this._rasgoNombrado(peticion, ctx) : null;
     if (nombrado) parrafos.push(nombrado);
 
     // ─── 2. Atmósfera ──────────────────────────────────────────────────
@@ -665,6 +732,18 @@ export class ProceduralProvider extends IDMProvider {
       if (!alrededor && /\b(?:el|la|los|las|un|una|unos|unas)\s+\p{L}{3,}/u.test(n)) {
         lineas.push('Nada ahí que llame la atención.');
         return { lineas, memoria };
+      }
+    } else {
+      // Lo que mira es de lo que está pasando («la figura del tejado»), no
+      // el tejado del pueblo: se cuenta cómo está ahora. Con «tejado» dentro
+      // salía la descripción de las calles.
+      const cosa = n.match(/\b(?:el|la|los|las|un|una|unos|unas)\s+(\p{L}{3,})/u)?.[1];
+      const raiz = cosa ? cosa.replace(/(?:as|os|es|a|o|s)$/u, '') : '';
+      const deLaSituacion = raiz.length >= 3 && sinAcentos(String(ctx.situacion?.texto ?? '').toLowerCase()).includes(raiz);
+      if (deLaSituacion) {
+        const frases = (ctx.escenaTextos ?? []).flatMap((x) => String(x).split(/(?<=[.!?»])\s+/u));
+        const ultima = [...frases].reverse().find((f) => sinAcentos(f.toLowerCase()).includes(raiz));
+        if (ultima) { lineas.push(ultima.replace(/^EN ESCENA:\s*/, '')); return { lineas, memoria }; }
       }
     }
     let rasgo = buscarRasgo(foco, lugar.refId, lugar.terreno) ?? rasgoGeneral(lugar.refId, lugar.terreno);
@@ -1381,6 +1460,44 @@ export class ProceduralProvider extends IDMProvider {
     const recuerdo = (texto) => (npc.refId ? [{ refId: npc.refId, texto, tipo: 'compartido' }] : []);
 
     switch (acto.acto) {
+      case ACTO.ABRIR_CHARLA: {
+        // «Hablar con Cordor» sin tema. La primera vez saluda desde su
+        // actitud y pregunta qué quieres; si ya estabais hablando, no repite
+        // el saludo: pide algo concreto. Salía «Hablas con Cordor. Cordor
+        // espera tu respuesta» tres veces sin que nadie dijera nada.
+        const turno = ctx.turno ?? 0;
+        const hablando = Number.isFinite(npc.ultimoEncuentro) && turno - npc.ultimoEncuentro <= 3;
+        if (hablando) {
+          return {
+            texto: aprecio <= -20 ? `${n} resopla. «¿Qué quieres ahora?»`
+              : this._unico([`«Si quieres saber algo, pregúntalo. ¿Y bien?», dice ${n}.`, `${n} deja lo que hacía. «¿Qué te hace falta, exactamente?»`]),
+          };
+        }
+        const clave = typeof npc.actitud === 'string' && NPC.saludos[npc.actitud] ? npc.actitud
+          : aprecio >= 30 ? 'amable' : aprecio <= -20 ? 'hostil' : 'cordial';
+        const saludo = this._unico(NPC.saludos[clave]);
+        const suyo = ACTIVIDAD[sinAcentos(String(npc.rol ?? '').toLowerCase())];
+        const dicho = saludo.startsWith('«') ? `${saludo.slice(0, -1).replace(/[.!?]?$/u, (s) => s || '.')}», dice ${n}.` : `${n}. ${saludo}`;
+        return { texto: `${suyo ? `${suyo.replace('{n}', n)} ` : ''}${saludo.startsWith('«') ? dicho : `${n} ${saludo.charAt(0).toLowerCase()}${saludo.slice(1)}`}` };
+      }
+      case ACTO.ALEJAR:
+        // «Déjame en paz» no es pedir un favor que se conceda con dados: se
+        // respeta. Salía «Eso no puedo hacerlo».
+        return {
+          texto: aprecio <= -20 ? `«Encantado», dice ${n}, y te da la espalda.`
+            : this._unico([`${n} levanta las manos y se aparta. «Como quieras.»`, `${n} asiente y vuelve a lo suyo sin decir nada más.`]),
+          npcMemory: recuerdo('Le pidió que le dejara en paz.'),
+        };
+      case ACTO.ENFRENTAR: {
+        // Encararse es tensión: quien lo recibe reacciona según lo que siente
+        // por ti. No abre un combate ni trae guardias.
+        return {
+          texto: aprecio >= 30 ? `${n} te mira como si no te reconociera. «¿A qué viene esto?» Más dolido que asustado.`
+            : aprecio <= -20 ? `${n} no se aparta. «Cuidado con lo que haces», dice, y la gente de alrededor empieza a mirar.`
+              : this._unico([`${n} da un paso atrás y levanta las manos. «Tranquilo. No busco problemas.»`, `${n} se tensa y te sostiene la mirada. «¿Qué te pasa conmigo?»`]),
+          npcMemory: recuerdo('Se le encaró sin motivo aparente.'),
+        };
+      }
       case ACTO.AGRADECER:
         return {
           texto: aprecio <= -20 ? `${n} se encoge de hombros y no dice nada.`
@@ -1505,7 +1622,7 @@ export class ProceduralProvider extends IDMProvider {
     const llano = (t) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
     const frase = llano(ctx.foco ?? peticion.accion);
 
-    const m = frase.match(/\b(?:pregunto|preguntar|hablo|hablar|digo|decir|le pregunto|le digo)\s+(?:a la|al|a|con la|con el|con)\s+([a-zñ]+)/u);
+    const m = frase.match(/\b(?:pregunto|preguntar|hablo|hablar|digo|decir|le pregunto|le digo|enfrento|encaro)\s+(?:a la|al|a|con la|con el|con)\s+([a-zñ]+)/u);
     const destinatario = m?.[1] ?? null;
     // «le pregunto por el paso» sin decir a quién: a quien se estaba
     // hablando, no al primero de la lista.

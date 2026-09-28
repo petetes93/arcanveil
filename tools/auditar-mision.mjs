@@ -68,8 +68,12 @@ const escenas = [
 ];
 
 const todas = escenas.flatMap((e) => candidatas(e));
-comprobar(todas.every((p) => /\?$/.test(p)), 'toda pregunta candidata termina en «?»',
-  todas.filter((p) => !/\?$/.test(p)).join(' | '));
+// Cada candidata devuelve la palabra UNA vez: o pregunta, o dice quién
+// espera. «Corlin espera tu respuesta. ¿Qué haces?» apilaba dos cierres.
+const devuelve = (p) => /\?$/.test(p) || /espera tu (?:respuesta|movimiento)\.$/.test(p);
+const dos = (p) => /espera tu (?:respuesta|movimiento)\./.test(p) && /\?/.test(p);
+comprobar(todas.every((p) => devuelve(p) && !dos(p)), 'toda pregunta candidata devuelve la palabra una sola vez',
+  todas.filter((p) => !devuelve(p) || dos(p)).join(' | '));
 
 comprobar(candidatas({}).includes('¿Qué haces?'), 'la forma corta existe');
 

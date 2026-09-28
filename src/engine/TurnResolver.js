@@ -48,6 +48,7 @@ import { evaluar } from '../core/Dice.js';
 import { sinAcentos } from '../utils/text.js';
 import { interpretarTurno, escenaDesde } from './Interpretacion.js';
 import { separarVocativo } from './Segmentos.js';
+import { infinitivoAPrimera, intento } from './Infinitivo.js';
 
 /** Una huella corta y estable de un texto (FNV-1a), para identificar peticiones. */
 function huellaCorta(texto) {
@@ -65,6 +66,26 @@ const ACEPTA = /^(?:si,?\s*)?(?:acepto|lo acepto|acepto el encargo|cuenta conmig
 const RECHAZA = /^(?:no acepto|no me interesa|no lo hare|rechazo|paso|no cuentes conmigo|no,? gracias|no me encargo|no quiero ese encargo)\b/;
 /** Proponerse algo por su cuenta: son sus palabras, no un encargo. */
 const META = /^(?:me propongo|mi objetivo es|me marco como objetivo|he decidido|juro que)\s+(.+)$|^quiero\s+((?:averiguar|encontrar|descubrir|saber|recuperar|vengar|limpiar)\b.+)$/i;
+
+/** Tildes de las órdenes que se escriben sin ellas. */
+const TILDES_ORDEN = Object.freeze({ dejame: 'déjame', largate: 'lárgate', callate: 'cállate', apartate: 'apártate', quitate: 'quítate', sueltame: 'suéltame', dejadme: 'dejadme', largaos: 'largaos', callaos: 'callaos' });
+
+/**
+ * Una orden a otro sin decir a quién: «déjame en paz», «lárgate», «vete».
+ * Devuelve la orden bien escrita, o null. Si nombra a alguien, no es esto:
+ * ya tiene destinatario.
+ * @param {string} texto
+ * @returns {string|null}
+ */
+function ordenSinDestino(texto) {
+  const t = String(texto ?? '').trim().replace(/[.!¡]+$/u, '').replace(/^¡/u, '');
+  const n = sinAcentos(t.toLowerCase());
+  if (!/^(?:no\s+)?(?:dejame|dejadme|largate|largaos|vete|idos|callate|callaos|apartate|quitate|sueltame|basta ya|basta|fuera de aqui|dejalo ya)\b/.test(n)) return null;
+  if (/\p{Lu}\p{Ll}{2,}/u.test(t.slice(1))) return null;
+  if (t.split(/\s+/).length > 8) return null;
+  const bien = t.replace(/^(\p{L}+)/u, (w) => TILDES_ORDEN[sinAcentos(w.toLowerCase())] ?? w);
+  return `${bien.charAt(0).toUpperCase()}${bien.slice(1)}`;
+}
 
 /**
  * Cose los segmentos hechos en una sola frase: «le digo "no" y espero».
@@ -423,7 +444,10 @@ export class TurnResolver extends SystemBase {
       return null;
     }
 
-    const limpio = String(texto ?? '').trim();
+    // Lo que escribió, tal cual, para la bitácora; `limpio` es lo que se
+    // interpreta.
+    const escrito = String(texto ?? '').trim();
+    let limpio = escrito;
     if (limpio.length < LIMITES.entradaMin) return null;
 
     if (this.leer('meta.fase') === 'fin') {
@@ -438,6 +462,27 @@ export class TurnResolver extends SystemBase {
     // lo reescribe. No consume turno ni pasa por ningún narrador.
     const edicion = limpio.match(CANON_FUERA);
     if (edicion) return this._editarCanon(edicion[1].trim());
+
+    // ─── 0b. Infinitivos y órdenes sin destinatario ────────────────────
+    // «Fijarte en la figura del tejado» (una sugerencia, o como escribe
+    // mucha gente) es una acción suya: se pasa a primera persona. Se tomaba
+    // por algo dicho a alguien y salía «Le dices: «Fijarte…»».
+    limpio = infinitivoAPrimera(limpio);
+
+    // «Déjame en paz» sin decir a quién: a quien le acaba de hablar, si lo
+    // hay; si no, se pregunta en vez de narrarlo al aire.
+    const orden = ordenSinDestino(limpio);
+    if (orden) {
+      const quien = this._interlocutorReciente();
+      if (quien) {
+        limpio = `le digo a ${quien.nombre}: «${orden}»`;
+      } else {
+        const aqui = (this.leer('npcs.presentes', []) ?? []).map((id) => this.leer(`npcs.conocidos.porId.${id}.nombre`)).filter(Boolean);
+        this._anadirEntrada(VOCES.JUGADOR, escrito);
+        this._anadirEntrada(VOCES.SISTEMA, `¿A quién se lo dices? ${aqui.length ? `Si es a alguien de aquí, nómbralo (${aqui.join(', ')}). ` : ''}Si es al máster, di qué quieres hacer ahora: por ejemplo, «me alejo de aquí» o «me siento a descansar».`);
+        return { aclaracion: 'orden_sin_destino' };
+      }
+    }
 
     // ─── 1. Interpretación ──────────────────────────────────────────────
     const contextoIntencion = {
@@ -480,6 +525,24 @@ export class TurnResolver extends SystemBase {
       Object.assign(intencion, { tipo: 'talk', habilidad: 'trato_social', requiereTirada: false, objetivo: null });
     }
 
+    // Encararse sin decir con quién («me enfrento a un ciudadano», con cuatro
+    // delante): no se elige a nadie ni se inventa una pelea; se pregunta,
+    // sin gastar turno. Salía «Te enfrentas a un ciudadano» y nada más.
+    const conQuien = () => {
+      const aqui = (this.leer('npcs.presentes', []) ?? []).map((id) => this.leer(`npcs.conocidos.porId.${id}`)).filter((n) => n?.nombre);
+      const n = sinAcentos(limpio.toLowerCase());
+      const porOficio = aqui.filter((x) => x.rol && new RegExp(`\\b${sinAcentos(x.rol.toLowerCase())}`).test(n));
+      return this._aQuienSeHablo(limpio, { soloNombrado: true }) ?? (porOficio.length === 1 ? porOficio[0] : null);
+    };
+    if (intencion.acto?.acto === 'enfrentar' && !conQuien()) {
+      const aqui = (this.leer('npcs.presentes', []) ?? []).map((id) => this.leer(`npcs.conocidos.porId.${id}`)).filter((n) => n?.nombre);
+      this._anadirEntrada(VOCES.JUGADOR, escrito);
+      this._anadirEntrada(VOCES.SISTEMA, aqui.length
+        ? `¿Con quién? Aquí están ${aqui.map((n) => (n.rol ? `${n.nombre} (${n.rol})` : n.nombre)).join(', ')}, y nadie te ha provocado. Di con quién te encaras y cómo: con palabras o a golpes.`
+        : 'Aquí no hay nadie con quien encararse.');
+      return { aclaracion: 'enfrentar_sin_destino' };
+    }
+
     // Los comandos no consumen turno.
     if (intencion.esComando) {
       return this._ejecutarComando(intencion);
@@ -496,7 +559,7 @@ export class TurnResolver extends SystemBase {
 
     try {
       // ─── 2. La acción se registra en la bitácora ──────────────────────
-      this._anadirEntrada(VOCES.JUGADOR, limpio, { turno: numeroTurno });
+      this._anadirEntrada(VOCES.JUGADOR, escrito, { turno: numeroTurno });
 
       // ─── 2a. Encargos y objetivos, dichos con palabras ────────────────
       const encargo = this._encargosPorTexto(textoFoco);
@@ -549,7 +612,11 @@ export class TurnResolver extends SystemBase {
       // patrulla no se contaba.
       const situaciones = this.sistema('situations');
       for (const o of plan.omisiones) situaciones?.intervenir(o.texto);
-      const situacion = plan.delegacion || porEncuentro ? null : (situaciones?.intervenir(textoFoco) ?? null);
+      // Lo imposible para su nivel se mide antes: «salto 100 metros hasta el
+      // tejado» no llega al tejado, así que la situación de arriba no puede
+      // reaccionar como si hubiera llegado.
+      const ambicion = evaluarAmbicion(limpio, this.leer('player.nivel', 1));
+      const situacion = plan.delegacion || porEncuentro || ambicion.grado === 'desmedida' ? null : (situaciones?.intervenir(textoFoco) ?? null);
 
       // «Que mi compañera negocie; yo observo»: actúa ella, él mira.
       const delegacion = plan.delegacion ? this._delegar(plan.delegacion) : null;
@@ -588,7 +655,6 @@ export class TurnResolver extends SystemBase {
       // ─── 3. LOS DADOS, ANTES QUE EL DIRECTOR ──────────────────────────
       // Antes de tirar se mide la ambición: lo desmedido para el nivel se
       // intenta contra la dificultad máxima; lo detallado gana un bono.
-      const ambicion = evaluarAmbicion(limpio, this.leer('player.nivel', 1));
       const rules = this.sistema('rules');
       const intencionTirada = ambicion.grado === 'desmedida'
         ? { ...intencion, requiereTirada: true, habilidad: intencion.habilidad ?? 'atletismo' }
@@ -688,6 +754,12 @@ export class TurnResolver extends SystemBase {
         // contexto, y el turno es lo que te contesta.
         if (peticion.tirada || intencion.tipo === 'talk') peticion.contexto.detalleEscena = situacion.narracion;
         else peticion.contexto.situacionResultado = situacion.narracion;
+        // El detalle solo cuenta como visto si se narra: con la tirada fallada
+        // o mientras se habla, no sale en el texto.
+        if (intencion.tipo === 'talk' || (peticion.tirada && !peticion.tirada.exito)) {
+          this.sistema('situations')?.detalleSinVer?.(situacion.situacion?.id);
+          peticion.contexto.situacion = this.sistema('situations')?.paraContexto?.() ?? peticion.contexto.situacion;
+        }
         pistas.push(`El jugador se fija en lo que está pasando. Lo que ve de cerca: ${situacion.narracion}`);
       } else if (situacion?.omitida) {
         pistas.push('El jugador ha decidido no meterse en lo que está pasando aquí. Respétalo: no le lleves de vuelta a ello ni le castigues por ignorarlo.');
@@ -804,8 +876,11 @@ export class TurnResolver extends SystemBase {
       const interlocutor = this._registrarConversacion(saneada, tipo, accionEco);
 
       // Cada turno termina devolviendo la palabra. La pone el modelo si la
-      // trae (`pregunta`); si no, el motor.
-      saneada.story = this._cerrarTurno(saneada.story, saneada.pregunta, interlocutor);
+      // trae (`pregunta`); si no, el motor. Tras despedirse o pedir que le
+      // dejen en paz, nadie «espera tu respuesta».
+      const seVa = ['alejar', 'despedirse'].includes(ir.acto?.acto);
+      const relevado = this._otroTomaLaPalabra(saneada.story, interlocutor);
+      saneada.story = this._cerrarTurno(saneada.story, saneada.pregunta, seVa || relevado ? null : interlocutor);
 
       this._anadirEntrada(VOCES.DM, saneada.story, {
         turno: numeroTurno,
@@ -829,7 +904,7 @@ export class TurnResolver extends SystemBase {
       }
 
       // ─── 9. Opciones ──────────────────────────────────────────────────
-      this.despachar('narrative/opciones', { opciones: saneada.choices ?? [] });
+      this._fijarOpciones(saneada.choices ?? [], escrito);
 
       // ─── 10. Combate ──────────────────────────────────────────────────
       // Una situación que acaba a golpes (atacar al del peaje, o que se
@@ -1070,7 +1145,56 @@ export class TurnResolver extends SystemBase {
 
   /** @private */
   _reducirOpciones(estado, accion) {
-    return { narrative: { opciones: accion.payload?.opciones ?? [] } };
+    const { opciones = [], usadas } = accion.payload ?? {};
+    return { narrative: { opciones, ...(usadas ? { sugerenciasUsadas: usadas } : {}) } };
+  }
+
+  /**
+   * Cómo está la escena, en una huella: dónde, qué situaciones y en qué
+   * punto, y quién hay. Si no cambia, una sugerencia usada no vuelve.
+   * @returns {string}
+   * @private
+   */
+  _huellaEscena() {
+    const sits = (this.sistema('situations')?.aqui?.() ?? [])
+      .map((s) => [s.refId, s.estado, s.pulsos ?? 0, Boolean(s.detalleVisto), s.intentos ?? 0, s.tension ?? 0]);
+    return JSON.stringify([this.leer('world.ubicacion'), sits, [...(this.leer('npcs.presentes', []) ?? [])].sort()]);
+  }
+
+  /**
+   * Fija las sugerencias del turno.
+   *
+   * Se sugirió «Hablar con Cordor» unas cinco veces seguidas: la que el
+   * jugador acaba de usar sin que cambie nada no se vuelve a ofrecer hasta
+   * que cambie la escena (otra situación, otro punto de la misma, otra
+   * gente). Y dos iguales no salen juntas. Queda guardado en la partida:
+   * tras cargar no vuelven las mismas.
+   *
+   * @param {Array<Object>} choices Lo que propone quien narra.
+   * @param {string|null} [usada] Lo que ha escrito o pulsado el jugador.
+   * @private
+   */
+  _fijarOpciones(choices, usada = null) {
+    const clave = (t) => sinAcentos(String(t ?? '').toLowerCase()).replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+    const huella = this._huellaEscena();
+    // Lista y no objeto: el parche del almacén funde objetos, y una clave
+    // quitada seguiría ahí.
+    const guardadas = this.leer('narrative.sugerenciasUsadas', []);
+    const usadas = new Map(Array.isArray(guardadas) ? guardadas.map((u) => [u.k, u.h]) : []);
+    const previas = (this.leer('narrative.opciones', []) ?? []).map((o) => clave(o.label));
+    // Lo que escribió cuenta si coincide con una sugerencia ofrecida, o si es
+    // la misma frase que una de ellas escrita a mano.
+    if (usada && (previas.includes(clave(usada)) || (choices ?? []).some((o) => clave(o.label) === clave(usada)))) usadas.set(clave(usada), huella);
+    // Se olvidan las de otras escenas: solo cuenta la actual.
+    for (const [k, h] of usadas) if (h !== huella) usadas.delete(k);
+    const vistas = new Set();
+    const opciones = (choices ?? []).filter((o) => {
+      const k = clave(o.label);
+      if (!k || vistas.has(k) || usadas.get(k) === huella) return false;
+      vistas.add(k);
+      return true;
+    });
+    this.despachar('narrative/opciones', { opciones, usadas: [...usadas].map(([k, h]) => ({ k, h })) });
   }
 
   /** @private */
@@ -1164,6 +1288,21 @@ export class TurnResolver extends SystemBase {
       this.sistema('npcs')?.registrarEncuentro?.(npc.refId);
     }
     return npc?.nombre ? npc : null;
+  }
+
+  /**
+   * Quien le ha hablado (o a quien ha hablado) en los dos últimos turnos y
+   * sigue aquí. Sin nadie así, una orden suelta no tiene destinatario.
+   * @returns {{refId: string, nombre: string}|null}
+   * @private
+   */
+  _interlocutorReciente() {
+    const turno = this.leer('meta.turno', 0);
+    const conocidos = this.leer('npcs.conocidos.porId', {}) ?? {};
+    return (this.leer('npcs.presentes', []) ?? [])
+      .map((id) => conocidos[id])
+      .filter((n) => n?.nombre && n.vivo !== false && Number.isFinite(n.ultimoEncuentro) && turno - n.ultimoEncuentro <= 2)
+      .sort((a, b) => b.ultimoEncuentro - a.ultimoEncuentro)[0] ?? null;
   }
 
   /**
@@ -1358,6 +1497,29 @@ export class TurnResolver extends SystemBase {
    * @returns {string}
    * @private
    */
+  /**
+   * Si después de lo que dijo el interlocutor aparece otro de los presentes,
+   * la escena ya no está en él: el guardia llega preguntando «¿Viste algo?»
+   * y cerraba «Cormir espera tu respuesta», con Cormir mudo desde hacía dos
+   * frases.
+   *
+   * @param {string} texto
+   * @param {{nombre: string}|null} interlocutor
+   * @returns {boolean}
+   * @private
+   */
+  _otroTomaLaPalabra(texto, interlocutor) {
+    const suyo = interlocutor?.nombre;
+    if (!suyo) return false;
+    const t = String(texto ?? '');
+    const desde = t.lastIndexOf(suyo);
+    if (desde < 0) return false;
+    const resto = t.slice(desde + suyo.length);
+    return (this.leer('npcs.presentes', []) ?? [])
+      .map((id) => this.leer(`npcs.conocidos.porId.${id}.nombre`))
+      .some((otro) => otro && otro !== suyo && resto.includes(otro));
+  }
+
   _cerrarTurno(texto, propuesta, interlocutor = null) {
     const pregunta = String(propuesta ?? '').trim() || this._preguntar(interlocutor);
     this._ultimaPregunta = pregunta;
@@ -1471,7 +1633,7 @@ export class TurnResolver extends SystemBase {
       story = this._cerrarTurno(story, respuesta.pregunta);
 
       this._anadirEntrada(VOCES.DM, story, { turno: 1, escenaAbierta: true });
-      this.despachar('narrative/opciones', { opciones: respuesta.choices ?? [] });
+      this._fijarOpciones(respuesta.choices ?? []);
 
       this.memoria.registrarTurno({
         numero: 1,

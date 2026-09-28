@@ -252,7 +252,6 @@ export class SituationSystem extends SystemBase {
       return { situacion: sit, omitida: true };
     }
 
-    this._atendida = sit.id;
     const turno = this.leer('meta.turno', 0);
     // Solo se resuelve por una vía si lo escrito es de ESTA situación (nombra
     // a los suyos, sus claves, o sigue con ella). Mirar a secas es atención:
@@ -262,8 +261,21 @@ export class SituationSystem extends SystemBase {
     // Ofrecerle algo o ayuda a alguien no es intervenir todavía: «le ofrezco
     // a Berdar un poco de mi agua» casaba con la vía de atraer a la cabra con
     // comida, y la cabra se llevaba lo que era para el pastor.
-    const soloOfrece = [ACTO.OFRECER, ACTO.OFRECER_AYUDA].includes(actoDeHabla(texto)?.acto);
-    const via = deEsta && !soloOfrece ? plantilla.vias.find((v) => v.patron.test(n)) : null;
+    const acto = actoDeHabla(texto)?.acto;
+    const soloOfrece = [ACTO.OFRECER, ACTO.OFRECER_AYUDA].includes(acto);
+    // Una vía dirigida a alguien (`contra`) no se toma si lo escrito va a
+    // otro de la escena: «me enfrento a Damán» casaba con plantarle cara a
+    // la figura del tejado, y el robo se frustraba por encararse con la
+    // víctima.
+    const nombra = (actor) => Boolean(actor?.nombre) && n.includes(llano(actor.nombre));
+    const aOtroActor = (v) => Boolean(v.contra) && !nombra(sit.actores[v.contra])
+      && Object.entries(sit.actores).some(([clave, a]) => clave !== v.contra && nombra(a));
+    const via = deEsta && !soloOfrece ? plantilla.vias.find((v) => v.patron.test(n) && !aOtroActor(v)) : null;
+    // Encararse con alguien que no es el blanco de ninguna vía no es cosa de
+    // la situación: lo resuelve la conversación, con la reacción de quien lo
+    // recibe.
+    if (!via && acto === ACTO.ENFRENTAR) return null;
+    this._atendida = sit.id;
 
     if (!via) {
       // Mirar de cerca también cuenta, y se ve algo que no se veía de lejos.
@@ -444,7 +456,14 @@ export class SituationSystem extends SystemBase {
       tension: sit.tension ?? 0,
       sinAtender: this.leer('meta.turno', 0) - sit.ultimaAtencion,
       ignoradaAProposito: Boolean(sit.ignoradaAProposito),
+      // Lo que se le propone, de sus vías: primero mirar, y lo demás cuando
+      // ya lo ha visto de cerca (ver `data/situaciones.data.js`).
       sugerencia: plantilla.sugerencia ?? null,
+      sugerencias: (plantilla.sugerencias ?? [])
+        .filter((s) => s.tras !== 'detalle' || sit.detalleVisto)
+        .map((s) => ({ label: this.rellenar(s.label, sit), intent: s.intent })),
+      detalleVisto: Boolean(sit.detalleVisto),
+      tema: plantilla.tema ?? null,
     };
   }
 
@@ -458,6 +477,19 @@ export class SituationSystem extends SystemBase {
     const lineas = [`SITUACIÓN EN MARCHA AQUÍ (no es una misión; el jugador puede ignorarla): ${c.texto}`, `Lo que quiere cada uno: ${c.agenda}`];
     if (c.ignoradaAProposito) lineas.push('El jugador ha decidido no meterse. Respétalo: sigue su curso sin él y sin castigarle por ello.');
     return lineas.join('\n');
+  }
+
+  /**
+   * Mirar y no llegar a ver: el detalle sigue por descubrir. `intervenir` lo
+   * da por visto al fijarse, pero con la tirada fallada solo se cuenta lo
+   * evidente, y las sugerencias que dependen del detalle («Avisar a Damán
+   * de que le vigilan») salían sin que el jugador supiera nada de ello.
+   *
+   * @param {string} id
+   */
+  detalleSinVer(id) {
+    const sit = this.aqui().find((s) => s.id === id);
+    if (sit?.detalleVisto) this._guardar({ ...sit, detalleVisto: false });
   }
 
   /* ═══════════════════════════════════════════════════════════════════════

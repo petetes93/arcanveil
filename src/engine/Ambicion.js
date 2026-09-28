@@ -32,6 +32,22 @@ const DESMEDIDAS = [
   { nivel: 8, patron: /\b(teletransport\w*|detengo el tiempo|paro el tiempo|viajo en el tiempo)\b/ },
 ];
 
+/** Números escritos con letra que se usan para distancias. */
+const NUMEROS = Object.freeze({ diez: 10, doce: 12, quince: 15, veinte: 20, treinta: 30, cuarenta: 40, cincuenta: 50, cien: 100, ciento: 100, doscientos: 200, trescientos: 300, quinientos: 500, mil: 1000 });
+
+/**
+ * Un salto de más metros de los que salta un cuerpo (unos 8 de largo). «Salto
+ * 100 metros hasta el tejado de enfrente» se narraba como si volara.
+ * @param {string} t Texto normalizado.
+ * @returns {number|null} Los metros, si son imposibles.
+ */
+function saltoImposible(t) {
+  const m = t.match(/\b(?:salt\w*|brinc\w*)\b[^.;]{0,40}?\b(\d+(?:[.,]\d+)?|diez|doce|quince|veinte|treinta|cuarenta|cincuenta|cien|ciento|doscientos|trescientos|quinientos|mil)\s*(?:metros|m|varas)\b/);
+  if (!m) return null;
+  const n = NUMEROS[m[1]] ?? Number(m[1].replace(',', '.'));
+  return Number.isFinite(n) && n > 8 ? n : null;
+}
+
 const normalizar = (t) => String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 /**
@@ -43,6 +59,16 @@ const normalizar = (t) => String(t ?? '').toLowerCase().normalize('NFD').replace
  */
 export function evaluarAmbicion(texto, nivel = 1) {
   const t = normalizar(texto);
+
+  const metros = saltoImposible(t);
+  if (metros) {
+    return {
+      grado: 'desmedida',
+      nivelNecesario: 99,
+      pista: `El personaje intenta saltar ${metros} metros. Ningún cuerpo llega tan lejos: narra el intento y dónde acaba de verdad `
+        + '(se queda corto, cae, se agarra a lo que puede), sin que llegue al otro lado ni pase nada de lo que habría pasado allí.',
+    };
+  }
 
   for (const d of DESMEDIDAS) {
     if (nivel < d.nivel && d.patron.test(t)) {

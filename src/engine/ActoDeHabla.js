@@ -34,7 +34,18 @@ export const ACTO = Object.freeze({
   PEDIR_AVISO: 'pedir_aviso',
   DESPEDIRSE: 'despedirse',
   ESCUCHAR: 'escuchar',
+  ABRIR_CHARLA: 'abrir_charla',
+  ENFRENTAR: 'enfrentar',
+  ALEJAR: 'alejar',
 });
+
+/** «Déjame en paz», «lárgate»: que le dejen tranquilo. No es pedir un favor. */
+const ALEJAR = /\b(?:dejame|dejadme|dejeme) (?:en paz|tranquil[oa]s?|solo|sola)\b|\b(?:largate|largaos|vete de aqui|apartate|quitate de en medio|no me molestes)\b/;
+
+/** «Hablo con Cordor» y nada más: abrir conversación, sin tema todavía. */
+const ABRIR_CHARLA = /^(?:(?:me acerco|voy|me dirijo)\s+(?:a|al|a la|hacia)\s+[^,.;]+?\s+(?:y\s+)?)?(?:hablo|charlo|converso|me pongo a hablar|entablo conversacion|voy a hablar|me acerco a hablar|me paro a hablar|intento hablar)\s+(?:un rato\s+)?con\s+[^,.;?]+?(?:\s+un rato)?$/;
+/** Encararse con alguien: tensión, no combate. */
+const ENFRENTAR = /\b(?:me enfrento (?:a|con)|me encaro con|encaro a|le planto cara|planto cara a|confronto a|le hago frente|hago frente a|me pongo delante de)\b/;
 
 /** Lo que se regala sin pedir nada a cambio. */
 const REGALABLE = 'agua|comida|pan|vino|cerveza|odre|cantimplora|queso|fruta|manzanas?|racion(?:es)?|tabaco|manta|capa|flor(?:es)?|carne|cecina|hidromiel|licor|trago|sopa|caldo|galletas?|nueces|miel|bollo';
@@ -66,6 +77,12 @@ export function actoDeHabla(texto) {
   const n = llano(texto);
   if (!n) return null;
   if (ESCUCHAR.test(n)) return { acto: ACTO.ESCUCHAR };
+  if (ENFRENTAR.test(n)) return { acto: ACTO.ENFRENTAR };
+  if (ALEJAR.test(n)) return { acto: ACTO.ALEJAR };
+  // Con tema detrás del nombre («hablo con Cordor del incendio») ya es una
+  // pregunta, no solo abrir la conversación.
+  const conTema = /\bcon\s+\p{Lu}\p{Ll}+\s+(?:de|del|sobre|acerca|por)\b/u.test(String(texto));
+  if (!conTema && ABRIR_CHARLA.test(n.replace(/[.!]+$/, '').trim())) return { acto: ACTO.ABRIR_CHARLA };
   if (OFRECER_AYUDA.test(n)) return { acto: ACTO.OFRECER_AYUDA };
   // «Le ofrezco a Berdar un poco de mi agua»: el destinatario puede ir en medio.
   const regalo = n.match(new RegExp(`\\b(?:le|te|les|os) (?:ofrezco|doy|regalo|tiendo|acerco|paso|comparto)(?: (?:a|al|a la) \\p{L}+(?: \\p{L}+)?)? (?:un poco de |algo de |un trago de |parte de |un trozo de |un pedazo de |media |un mendrugo de )?(?:mi |mis |un |una |el |la |unos |unas )?(${REGALABLE})\\b`, 'u'));

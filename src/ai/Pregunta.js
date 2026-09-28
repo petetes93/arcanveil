@@ -37,8 +37,10 @@ export function candidatas({ npcs = [], enemigos = [], franja = null } = {}) {
   const lista = [];
 
   const enemigo = enemigos.find((e) => e?.nombre)?.nombre;
+  // Una sola forma de devolver la palabra, no dos: «Cordor espera tu
+  // respuesta. ¿Qué haces?» apilaba dos cierres.
   if (enemigo) {
-    lista.push(`${enemigo} espera tu movimiento. ¿Qué haces?`, CORTA);
+    lista.push(`${enemigo} espera tu movimiento.`, CORTA);
     return lista;
   }
 
@@ -47,7 +49,7 @@ export function candidatas({ npcs = [], enemigos = [], franja = null } = {}) {
   // partidas medidas con `tools/medir-narrador.mjs`). Se queda la forma
   // corta y, si alguien espera respuesta de verdad, se dice quién.
   const npc = npcs.find((n) => n?.nombre)?.nombre;
-  if (npc) lista.push(`${npc} espera tu respuesta. ¿Qué haces?`);
+  if (npc) lista.push(`${npc} espera tu respuesta.`);
 
   // Las franjas son las del reloj del juego: «ocaso» y «alba», no «anochecer».
   if (franja === 'ocaso' || franja === 'noche') lista.push('La noche se echa encima. ¿Qué haces?');
@@ -84,7 +86,9 @@ export function preguntaDeMesa(escena = {}, { anterior = null, elegir = (l) => l
  */
 export function terminaEnPregunta(texto) {
   const ultima = String(texto ?? '').trim().split('\n').filter((l) => l.trim()).at(-1) ?? '';
-  return /\?[»"”]?$/u.test(ultima.trim());
+  // También si quien habla acaba de preguntar: «¿Qué necesitas?», dice
+  // Cordor. La palabra ya está devuelta; otro «¿Qué haces?» sobra.
+  return /\?[»"”]?$/u.test(ultima.trim()) || /«[^»]*\?»/u.test(ultima);
 }
 
 /**
