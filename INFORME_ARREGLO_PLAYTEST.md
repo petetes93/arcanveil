@@ -1,13 +1,13 @@
 # Arreglo integral del playtest: informe
 
-Rama `feat/arreglo-playtest`, sacada de `feat/narrador-ia` (18b0cfa). `main` (8c02138) sin tocar. Todo local: **no se ha hecho push** ni se ha llamado a Groq, Gemini, Cloudflare ni a ningún servicio real. Las pruebas usan dobles en 127.0.0.1.
+Rama `feat/arreglo-playtest`, sacada de `feat/narrador-ia` (18b0cfa). `main` (8c02138) sin tocar. Subida a GitHub el 29-sep-2026 hasta 2a8e2e9; los cinco commits de la revisión posterior (19384a0 … 9579120) están **en local, sin subir**. No se ha llamado a Groq, Gemini, Cloudflare ni a ningún servicio real: las pruebas usan dobles en 127.0.0.1.
 
 **Esto no está «todo solucionado».** Quedan por validar con el mundo real: activar Groq (cuenta, plan y permiso tuyos), generar imágenes con ComfyUI en tu equipo, revisar el estilo con tu imagen de referencia (no ha llegado) y medir la portada en un móvil de verdad. Ver [Pendiente](#pendiente-y-decisiones-tuyas).
 
 ## Cómo comprobarlo
 
 ```bash
-for f in tools/auditar-*.mjs; do node "$f"; done   # 28 auditorías, sin red
+node tools/auditar-todo.mjs                         # 28 auditorías, sin red, por código de salida
 node tools/regresion-app.mjs --capturas             # Chrome móvil (390×844)
 node tools/regresion-app.mjs --capturas --desktop   # Chrome escritorio (1440×900)
 node tools/regresion-app.mjs --sin-ia               # sin generador de imágenes
@@ -16,7 +16,42 @@ node tools/buscar-secretos.mjs                      # claves en árbol e histori
 node tools/auditar-playtest.mjs --salida carpeta    # y lee las dos partidas
 ```
 
-Estado al cerrar: 28/28 auditorías en verde; regresión en Chrome móvil, escritorio y sin generador con 0 fallos, 0 excepciones y 0 peticiones fuera del equipo; ninguna clave en 306 archivos ni en los 248 commits de todas las ramas. Capturas en `dist/regresion/` (01 portada … 06 retrato sin red).
+**Corrección.** Este informe decía «28/28 auditorías en verde» para 2a8e2e9, y no era cierto: `auditar-servidores.mjs` se caía con código 1 (ENOENT, leía `src/art/retrato-local.js`, borrado en la rama). El bucle con que se comprobó miraba las últimas líneas de salida, no el código de salida. Desde 19384a0, `tools/auditar-todo.mjs` las cuenta por código.
+
+Estado en 9579120, 29-sep-2026 (Node 24.17.0, Windows 11, Chrome sin ventana):
+
+| Auditoría | Código | Duración |
+|---|---|---|
+| auditar-arte | 0 | 0,1 s |
+| auditar-borrados | 0 | 0,8 s |
+| auditar-cadencia | 0 | 0 s |
+| auditar-canon | 0 | 0,6 s |
+| auditar-coherencia | 0 | 0,1 s |
+| auditar-combate-libre | 0 | 13,4 s |
+| auditar-combate | 0 | 0,1 s |
+| auditar-config | 0 | 0,1 s |
+| auditar-creacion | 0 | 0,1 s |
+| auditar-cronica | 0 | 0,1 s |
+| auditar-economia | 0 | 0,7 s |
+| auditar-encargos | 0 | 0 s |
+| auditar-groq-diagnostico | 0 | 0,3 s |
+| auditar-guardados | 0 | 1 s |
+| auditar-historia | 0 | 22,7 s |
+| auditar-imports | 0 | 0,1 s |
+| auditar-interpretacion | 0 | 10,8 s |
+| auditar-mision | 0 | 0,1 s |
+| auditar-narrador-ia | 0 | 4,4 s |
+| auditar-narrador | 0 | 13,8 s |
+| auditar-persona | 0 | 0,1 s |
+| auditar-playtest | 0 | 27,7 s |
+| auditar-puente-uso | 0 | 1 s |
+| auditar-retrato | 0 | 0,6 s |
+| auditar-servidores | 0 | 4,4 s |
+| auditar-sujeto | 0 | 0 s |
+| auditar-sw | 0 | 0,1 s |
+| auditar-xss | 0 | 0,1 s |
+
+28/28 terminadas con código 0. Regresión en Chrome: móvil y escritorio con estudio completo (pintar, otra, usar, cerrar sin elegir, nube con permiso) y borrado de datos con recarga; `--sin-ia` con marcador. Las tres con 20 turnos, 0 fallos, 0 excepciones y 0 peticiones fuera del equipo. `generar-sw.mjs --revisar`: al día. `buscar-secretos.mjs`: ninguna clave en el árbol ni en los 262 commits de todas las ramas (este checkout sí tiene historia). La imagen de las regresiones es un PNG verde de 1×1 del doble: no dice nada de la calidad de FLUX ni de ComfyUI. Capturas en `dist/regresion/`.
 
 ## Por commit
 
@@ -38,6 +73,16 @@ Estado al cerrar: 28/28 auditorías en verde; regresión en Chrome móvil, escri
 | 5b0becd regresión | La regresión fallaba 2 de cada 40 veces | El saqueador esquiva: no hay tirada con +1 | Se repite el combate si se esquiva | Reproducido con el motor sin ventana | — |
 | f7de334 + 19acbac imágenes | Retratos y escenas pedidos solos a Pollinations (anime), puestos sin aprobar, URL que muere sin red; cara vectorial genérica | Generación automática y anónima | Estudio: candidata privada, «Otra versión», «Usar esta versión»; galería en IndexedDB con claves estables; marcador con el nombre; sin Pollinations | `auditar-retrato` 26, `auditar-sujeto`, regresión con puente real y proveedor falso: sobrevive sin red, 0 peticiones fuera | **ComfyUI real sin probar**; estilo sin tu referencia; pintar enemigos fuera de combate sin sitio en la interfaz |
 | be9da80 portada | 200 pintados y 100 maquetaciones por segundo con la portada quieta | `text-shadow` animado en la marca; polvo que gira; vetas con corte seco; `blur` animado | transform y opacity; polvo que solo deriva; vetas en rampa; sin `blur` al entrar | `medir-portada`: pintado y maqueta 0; tareas −25 % | Estilo +9 ms/s; **sin medir en un móvil** |
+
+### Revisión del 29-sep (fallos encontrados en 2a8e2e9)
+
+| Commit | Evidencia inicial | Raíz | Cambio | Prueba | Riesgo restante |
+|---|---|---|---|---|---|
+| 19384a0 auditorías | `auditar-servidores.mjs` terminaba con código 1 (ENOENT, línea 272) y el informe decía 28/28 | Leía `retrato-local.js`, borrado; el bucle de comprobación no miraba el código de salida | La sección de puertos importa los contratos vivos y cruza los dos puentes de verdad; `auditar-todo.mjs` cuenta por código | 68/68 entonces; 28/28 terminadas con 0 | Una auditoría nueva que no ponga `process.exitCode` en fallo |
+| bc7e6d5 enlaces | Con `assets/linked` → carpeta de fuera, `GET /assets/linked/private.png` daba 200 y los bytes | `stat`/`readFile` siguen enlaces; la lista se comprobaba sobre la cadena | La ruta canónica tiene que ser la pedida bajo la raíz canónica; se lee la canónica; ningún enlace | `auditar-servidores` 73: fuera, codificadas, interno, GET/HEAD normales, `--lan` (con lo anterior fallan 3) | Enlace de archivo no probado en este Windows (EPERM al crearlo); ventana comprobar-leer con acceso de escritura local |
+| 9a614d0 candidatas | El estudio decía «no se guarda ni se envía» y el puente escribía cada candidata en disco antes de aprobar; ComfyUI en `output/` | Caché sin ciclo de vida; texto sin relación con el proveedor | Nota según proveedor; permiso con la nube; caché con dueño, olvido al cerrar, 24 h, tope 40, `--limpiar`; ComfyUI a temporal | `auditar-retrato` y Chrome: archivos e IndexedDB en cada paso, cerrar sin elegir, nube | Sin ComfyUI real: qué deja él fuera de su temporal está sin comprobar |
+| 3c1ab31 borrar datos | Tras «Borrar partidas y personajes» y recargar, los retratos elegidos volvían | IndexedDB y el puente fuera del borrado | Espera a vaciar la galería (transacción confirmada) y pide al puente olvidar todo; dice qué no pudo; `borrarPersonaje` olvida su retrato | Chrome: galería y caché vacías tras recargar; lo ajeno intacto | Si el puente no está en marcha, sus candidatas esperan a caducar o a `--limpiar` (se avisa) |
+| 9579120 repetición | Mismo trío 9 y 10 de 20 turnos; una sugerencia 9 turnos seguidos; «¿Qué haces?» 15 y 16 de 20; «Preguntar a Cordan por Cordan» | Solo contaba como usado lo idéntico; lo ignorado no caducaba; la huella cambiaba con cada pulso | Usado por raíces; ignorado dos turnos descansa tres; huella sin pulsos; variante de cierre con la trama; aviso del mundo antes del cierre | `auditar-playtest` 25: trío 2 y 3/20, racha 3, «¿Qué haces?» 11/20 (con lo anterior fallan 6) | Sin trama ni interlocutor, «¿Qué haces?» sigue siendo el cierre; el procedural no escribe como un modelo |
 
 ## Arquitectura, en corto
 
@@ -61,4 +106,5 @@ Sigue sin dependencias. Se miró y no hizo falta: `idb-keyval` (IndexedDB son 80
 6. Pintar **enemigos** fuera del combate: la galería y el puente ya lo admiten; falta decidir dónde en la interfaz (¿un bestiario?).
 7. **Portada en un móvil de verdad**: sin ventana no se ve el tirón; `medir-portada` da los números de Chrome.
 8. Dos animaciones pequeñas siguen con `blur` (veredicto del dado y el rótulo de momento).
-9. **Push**: cuando digas; la rama está lista en local.
+9. **Push de la revisión**: los cinco commits desde 19384a0 están en local; se suben cuando digas.
+10. **Candidatas del puente**: ahora caducan a las 24 h con un tope de 40. Si prefieres que no se guarden nunca en disco (y «Otra versión» repinte siempre), es un cambio pequeño; es tu decisión.
