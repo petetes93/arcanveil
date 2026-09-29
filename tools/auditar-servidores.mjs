@@ -18,7 +18,7 @@
 
 import { request } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir, networkInterfaces } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,7 +92,44 @@ console.log('\n── servir.mjs: lo público y nada más ──');
     comprobar(r.estado !== 200 && !String(r.cuerpo).includes('esto-no-es') && !String(r.cuerpo).includes('PNGFALSO'), `fixture privado: ${ruta} → ${r.estado}`);
   }
   prueba.close();
+
+  // Enlaces: la lista de lo público se comprobaba sobre la cadena, y `stat`
+  // y `readFile` siguen enlaces. Con `assets/linked` → una carpeta de fuera,
+  // `/assets/linked/private.png` daba 200 con sus bytes. Política: ningún
+  // enlace, apunte fuera o dentro.
+  const fuera = mkdtempSync(join(tmpdir(), 'arcanveil-fuera-'));
+  writeFileSync(join(fuera, 'private.png'), 'SENTINEL_PRIVATE');
+  mkdirSync(join(tmp, 'assets', 'sub'), { recursive: true });
+  writeFileSync(join(tmp, 'assets', 'normal.png'), 'NORMAL');
+  writeFileSync(join(tmp, 'assets', 'sub', 'dentro.png'), 'DENTRO');
+  symlinkSync(fuera, join(tmp, 'assets', 'linked'), 'junction');
+  symlinkSync(join(tmp, 'assets', 'sub'), join(tmp, 'assets', 'atajo'), 'junction');
+  let enlaceFichero = true;
+  try { symlinkSync(join(fuera, 'private.png'), join(tmp, 'assets', 'allowed.png'), 'file'); } catch { enlaceFichero = false; }
+  const conEnlaces = crearServidorEstatico({ raiz: tmp });
+  const qe = await escuchar(conEnlaces);
+  const sinBytes = (r) => r.estado === 404 && !String(r.cuerpo).includes('SENTINEL') && !String(r.cuerpo).includes('DENTRO');
+  comprobar((await pedir(qe, '/assets/normal.png')).estado === 200 && (await pedir(qe, '/assets/sub/dentro.png')).estado === 200
+    && (await pedir(qe, '/assets/normal.png', { metodo: 'HEAD' })).estado === 200, 'enlaces: los assets de siempre (GET y HEAD) siguen saliendo');
+  comprobar(sinBytes(await pedir(qe, '/assets/linked/private.png')), 'enlace a una carpeta de fuera: 404 sin bytes');
+  comprobar(sinBytes(await pedir(qe, '/assets/linked%2fprivate.png')) && sinBytes(await pedir(qe, '/assets/%6Cinked/private.png')), 'y por rutas codificadas, tampoco');
+  comprobar(sinBytes(await pedir(qe, '/assets/atajo/dentro.png')), 'enlace interno: también fuera (la política es ninguno)');
+  if (enlaceFichero) comprobar(sinBytes(await pedir(qe, '/assets/allowed.png')), 'enlace de archivo a fuera: 404 sin bytes');
+  else console.log('     (enlace de archivo: este Windows no deja crearlo sin permisos; lo cubre la misma comprobación de ruta canónica)');
+  conEnlaces.close();
+  // En modo red local (opt-in), la misma política.
+  const ipLan = Object.values(networkInterfaces()).flat().find((i) => i?.family === 'IPv4' && !i.internal)?.address;
+  if (ipLan) {
+    const enRed = crearServidorEstatico({ raiz: tmp, lan: true });
+    const ql = await escuchar(enRed);
+    comprobar((await pedir(ql, '/assets/normal.png', { host: `${ipLan}:${ql}` })).estado === 200 && sinBytes(await pedir(ql, '/assets/linked/private.png', { host: `${ipLan}:${ql}` })),
+      `con --lan (${ipLan}): lo público sí, los enlaces no`);
+    enRed.close();
+  }
+  rmSync(join(tmp, 'assets', 'linked'), { recursive: false, force: true });
+  rmSync(join(tmp, 'assets', 'atajo'), { recursive: false, force: true });
   rmSync(tmp, { recursive: true, force: true });
+  rmSync(fuera, { recursive: true, force: true });
 
   // Por defecto no escucha en la red: la dirección de la LAN no conecta.
   const lan = Object.values(networkInterfaces()).flat().find((i) => i?.family === 'IPv4' && !i.internal)?.address;

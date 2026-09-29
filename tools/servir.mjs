@@ -37,9 +37,10 @@
  */
 
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, realpath } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
-import { resolve, dirname, extname, sep } from 'node:path';
+import { resolve, dirname, extname, sep, relative, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
@@ -103,6 +104,9 @@ function direccionesLan() {
  */
 export function crearServidorEstatico({ raiz = RAIZ, lan = false } = {}) {
   const hostsPermitidos = new Set(['localhost', '127.0.0.1', '[::1]', ...(lan ? direccionesLan() : [])]);
+  // La raíz de verdad, por si el propio repositorio está detrás de un enlace.
+  const raizReal = realpathSync(raiz);
+  const mismo = process.platform === 'win32' ? (a, b) => a.toLowerCase() === b.toLowerCase() : (a, b) => a === b;
 
   const servidor = createServer(async (peticion, respuesta) => {
     const texto = (codigo, cuerpo) => {
@@ -131,9 +135,18 @@ export function crearServidorEstatico({ raiz = RAIZ, lan = false } = {}) {
     if (!destino.startsWith(raiz + sep)) return texto(404, 'no encontrado');
 
     try {
-      const info = await stat(destino);
+      // Ningún enlace: la ruta canónica tiene que ser la pedida, bajo la raíz
+      // canónica. Comprobar la cadena no bastaba: `stat` y `readFile` siguen
+      // enlaces, y `assets/linked` apuntando fuera servía lo de fuera (200 con
+      // los bytes). Se lee la ruta canónica, no la pedida: para colar otra
+      // cosa entre la comprobación y la lectura haría falta poder escribir en
+      // las carpetas públicas de este equipo.
+      const real = await realpath(destino);
+      const rel = relative(raizReal, real);
+      if (!rel || rel.startsWith('..') || isAbsolute(rel) || !mismo(rel.split(sep).join('/'), ruta)) return texto(404, 'no encontrado');
+      const info = await stat(real);
       if (!info.isFile()) return texto(404, 'no encontrado');
-      const cuerpo = peticion.method === 'HEAD' ? null : await readFile(destino);
+      const cuerpo = peticion.method === 'HEAD' ? null : await readFile(real);
 
       // El trabajador de servicio es la única excepción al `no-store`. Chrome
       // se niega a registrar un `sw.js` servido con `no-store` y falla con un
