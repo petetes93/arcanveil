@@ -329,6 +329,14 @@ export function crearNarrativa() {
      * @type {Array<{k: string, h: string}>}
      */
     sugerenciasUsadas: [],
+    /**
+     * Las que se enseñan ahora y cuántos turnos seguidos llevan a la vista:
+     * a los dos sin tomarlas, descansan tres turnos.
+     * @type {Array<{k: string, n: number, h: string}>}
+     */
+    sugerenciasVistas: [],
+    /** Las que descansan unos turnos tras estar a la vista sin tomarse. @type {Array<{k: string, h: string, hasta: number}>} */
+    sugerenciasPausadas: [],
     /** Última acción enviada por el jugador. */
     ultimaAccion: null,
     /** Historial de acciones escritas, para recuperarlas con Ctrl+↑. */

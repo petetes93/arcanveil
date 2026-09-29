@@ -67,6 +67,29 @@ const RECHAZA = /^(?:no acepto|no me interesa|no lo hare|rechazo|paso|no cuentes
 /** Proponerse algo por su cuenta: son sus palabras, no un encargo. */
 const META = /^(?:me propongo|mi objetivo es|me marco como objetivo|he decidido|juro que)\s+(.+)$|^quiero\s+((?:averiguar|encontrar|descubrir|saber|recuperar|vengar|limpiar)\b.+)$/i;
 
+/** Palabras que no dicen de qué va una sugerencia. */
+const VACIAS = new Set(['a', 'al', 'de', 'del', 'el', 'la', 'las', 'los', 'lo', 'le', 'les', 'en', 'con', 'por', 'para', 'que', 'se', 'un', 'una', 'unos', 'unas', 'y', 'o', 'me', 'te', 'mi', 'tu', 'su', 'sus', 'es', 'si']);
+
+/**
+ * ¿Lo que ha escrito el jugador dice lo mismo que una sugerencia? Cada
+ * palabra con contenido de la sugerencia tiene que estar en lo escrito, por
+ * su raíz (cuatro letras: «preguntar»/«pregunto», «hablar»/«hablo»). Si la
+ * sugerencia tiene más de tres, basta con tres de cada cuatro.
+ *
+ * @param {string} escrito
+ * @param {string} sugerencia Ya normalizada (minúsculas, sin tildes).
+ * @returns {boolean}
+ */
+function cubre(escrito, sugerencia) {
+  const palabras = (t) => sinAcentos(String(t).toLowerCase()).replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((p) => p && !VACIAS.has(p));
+  const suyas = palabras(sugerencia);
+  if (!suyas.length) return false;
+  const mias = palabras(escrito);
+  const casa = (a, b) => a === b || (a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4));
+  const hay = suyas.filter((s) => mias.some((m) => casa(s, m))).length;
+  return suyas.length <= 3 ? hay === suyas.length : hay / suyas.length >= 0.75;
+}
+
 /** Tildes de las órdenes que se escriben sin ellas. */
 const TILDES_ORDEN = Object.freeze({ dejame: 'déjame', largate: 'lárgate', callate: 'cállate', apartate: 'apártate', quitate: 'quítate', sueltame: 'suéltame', dejadme: 'dejadme', largaos: 'largaos', callaos: 'callaos' });
 
@@ -880,12 +903,17 @@ export class TurnResolver extends SystemBase {
       // dejen en paz, nadie «espera tu respuesta».
       const seVa = ['alejar', 'despedirse'].includes(ir.acto?.acto);
       const relevado = this._otroTomaLaPalabra(saneada.story, interlocutor);
+      const sinCierre = saneada.story;
       saneada.story = this._cerrarTurno(saneada.story, saneada.pregunta, seVa || relevado ? null : interlocutor);
 
       this._anadirEntrada(VOCES.DM, saneada.story, {
         turno: numeroTurno,
         escenaAbierta: this.leer('narrative.escenaAbierta', true),
         mood: saneada.mood,
+        // La pregunta añadida, si se añadió: un aviso del mundo que llegue
+        // después en el mismo turno («Cierra el mercado») se pone delante de
+        // ella, no detrás (ver `_reducirAnadirEntrada`).
+        cierre: saneada.story !== sinCierre ? this._ultimaPregunta : null,
       });
 
       // Los eventos no silenciosos se narran aparte.
@@ -1128,7 +1156,21 @@ export class TurnResolver extends SystemBase {
     const { entrada } = accion.payload ?? {};
     if (!entrada) return null;
 
-    const entradas = [...estado.narrative.entradas, entrada];
+    let entradas = [...estado.narrative.entradas, entrada];
+    // Un aviso del mundo en el mismo turno va antes de la pregunta que
+    // devuelve la palabra: salía «¿Qué haces? / Cierra el mercado.», y la
+    // pregunta quedaba enterrada. La pregunta pasa a su propia línea, al final.
+    const ultima = estado.narrative.entradas.at(-1);
+    if (entrada.voz === VOCES.SISTEMA && ultima && ultima.turno === entrada.turno) {
+      const cierre = ultima.meta?.cierre;
+      if (ultima.voz === VOCES.DM && cierre && ultima.texto.endsWith(`\n${cierre}`)) {
+        const narrado = { ...ultima, texto: ultima.texto.slice(0, -(cierre.length + 1)), meta: { ...ultima.meta, cierre: null } };
+        const pregunta = { ...ultima, id: `${ultima.id}-cierre`, texto: cierre, meta: { turno: ultima.turno, soloCierre: true } };
+        entradas = [...estado.narrative.entradas.slice(0, -1), narrado, entrada, pregunta];
+      } else if (ultima.meta?.soloCierre) {
+        entradas = [...estado.narrative.entradas.slice(0, -1), entrada, ultima];
+      }
+    }
 
     // La bitácora se poda en el estado, no solo en el DOM.
     const podadas = entradas.length > LIMITES.narrativaMax * 2
@@ -1145,8 +1187,15 @@ export class TurnResolver extends SystemBase {
 
   /** @private */
   _reducirOpciones(estado, accion) {
-    const { opciones = [], usadas } = accion.payload ?? {};
-    return { narrative: { opciones, ...(usadas ? { sugerenciasUsadas: usadas } : {}) } };
+    const { opciones = [], usadas, vistas, pausadas } = accion.payload ?? {};
+    return {
+      narrative: {
+        opciones,
+        ...(usadas ? { sugerenciasUsadas: usadas } : {}),
+        ...(vistas ? { sugerenciasVistas: vistas } : {}),
+        ...(pausadas ? { sugerenciasPausadas: pausadas } : {}),
+      },
+    };
   }
 
   /**
@@ -1156,8 +1205,12 @@ export class TurnResolver extends SystemBase {
    * @private
    */
   _huellaEscena() {
+    // Solo lo que cambia lo que tiene sentido proponer: el sitio, qué
+    // situación y en qué estado, si ya se vio de cerca, y quién hay. Los
+    // pulsos (la figura se mueve dos casas) y los intentos entraban aquí y
+    // cambiaban la huella cada dos turnos: lo ya usado volvía a salir.
     const sits = (this.sistema('situations')?.aqui?.() ?? [])
-      .map((s) => [s.refId, s.estado, s.pulsos ?? 0, Boolean(s.detalleVisto), s.intentos ?? 0, s.tension ?? 0]);
+      .map((s) => [s.refId, s.estado, Boolean(s.detalleVisto)]);
     return JSON.stringify([this.leer('world.ubicacion'), sits, [...(this.leer('npcs.presentes', []) ?? [])].sort()]);
   }
 
@@ -1181,20 +1234,40 @@ export class TurnResolver extends SystemBase {
     // quitada seguiría ahí.
     const guardadas = this.leer('narrative.sugerenciasUsadas', []);
     const usadas = new Map(Array.isArray(guardadas) ? guardadas.map((u) => [u.k, u.h]) : []);
+    const vistasAntes = new Map((this.leer('narrative.sugerenciasVistas', []) ?? []).map((v) => [v.k, v]));
     const previas = (this.leer('narrative.opciones', []) ?? []).map((o) => clave(o.label));
-    // Lo que escribió cuenta si coincide con una sugerencia ofrecida, o si es
-    // la misma frase que una de ellas escrita a mano.
-    if (usada && (previas.includes(clave(usada)) || (choices ?? []).some((o) => clave(o.label) === clave(usada)))) usadas.set(clave(usada), huella);
+    // Lo que escribió cuenta si es una sugerencia ofrecida, o si dice lo
+    // mismo con otras palabras: «le pregunto a Cordan qué se cuenta por
+    // aquí» es «Preguntar a Cordan qué se cuenta aquí». Antes solo contaba
+    // la frase exacta, y la sugerencia seguía saliendo ya contestada.
+    if (usada) {
+      const hecha = [...previas, ...(choices ?? []).map((o) => clave(o.label))].filter((k) => k && cubre(usada, k));
+      for (const k of hecha) usadas.set(k, huella);
+    }
     // Se olvidan las de otras escenas: solo cuenta la actual.
     for (const [k, h] of usadas) if (h !== huella) usadas.delete(k);
+    // Cuántos turnos seguidos lleva cada una a la vista en esta escena.
+    const edad = (k) => { const v = vistasAntes.get(k); return v && v.h === huella ? v.n : 0; };
+    // Dos turnos seguidos a la vista sin que el jugador la tome: descansa tres
+    // turnos y vuelve si sigue valiendo. «Fijarte en la figura del tejado»
+    // salía nueve turnos seguidos; y si caducaba hasta que cambiara la
+    // escena, las vías de la trama («Avisar a Iando…») no volvían antes del
+    // robo. Lo USADO sí espera a que cambie algo.
+    const turno = this.leer('meta.turno', 0);
+    const pausadas = new Map((this.leer('narrative.sugerenciasPausadas', []) ?? [])
+      .filter((p) => p.h === huella && p.hasta > turno).map((p) => [p.k, p]));
+    for (const [k, v] of vistasAntes) if (v.h === huella && v.n >= 2) pausadas.set(k, { k, h: huella, hasta: turno + 3 });
     const vistas = new Set();
+    // En el orden de quien narra: la trama delante. Solo las tres que se
+    // enseñan; si solo quedan dos útiles, dos, no una tercera de relleno.
     const opciones = (choices ?? []).filter((o) => {
       const k = clave(o.label);
-      if (!k || vistas.has(k) || usadas.get(k) === huella) return false;
+      if (!k || vistas.has(k) || usadas.get(k) === huella || pausadas.has(k)) return false;
       vistas.add(k);
       return true;
-    });
-    this.despachar('narrative/opciones', { opciones, usadas: [...usadas].map(([k, h]) => ({ k, h })) });
+    }).slice(0, 3);
+    const enseñadas = opciones.map((o) => ({ k: clave(o.label), n: edad(clave(o.label)) + 1, h: huella }));
+    this.despachar('narrative/opciones', { opciones, usadas: [...usadas].map(([k, h]) => ({ k, h })), vistas: enseñadas, pausadas: [...pausadas.values()] });
   }
 
   /** @private */
@@ -1545,8 +1618,11 @@ export class TurnResolver extends SystemBase {
       : [];
 
     const flujo = this.rng?.flujo?.('narrativa');
+    // Lo que está pasando, si el jugador no lo ha dejado de lado a propósito.
+    const sit = enemigos.length ? null : this.sistema('situations')?.paraContexto?.();
+    const tema = sit && !sit.ignoradaAProposito ? sit.tema : null;
     return preguntaDeMesa(
-      { npcs, enemigos, franja: this.leer('world.tiempo.franja') },
+      { npcs, enemigos, franja: this.leer('world.tiempo.franja'), tema },
       { anterior: this._ultimaPregunta, elegir: (lista) => flujo?.elegir(lista) ?? lista[0] },
     );
   }

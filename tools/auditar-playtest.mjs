@@ -150,6 +150,50 @@ console.log('\n── Dos partidas de 15 turnos: propiedades en todas ──');
   }
 }
 
+console.log('\n── Repetición sostenida: 20 turnos por semilla, con contadores ──');
+{
+  // Los casos de arriba prueban frases concretas; esto, que no se repita lo
+  // mismo turno tras turno. Antes (medido en 2a8e2e9): el mismo trío de
+  // sugerencias que el turno anterior en 9 y 10 de 20 turnos, una misma
+  // sugerencia hasta 9 turnos seguidos, y «¿Qué haces?» a secas en 15 y 16.
+  const GUION = (a, b) => [
+    'miro alrededor', `Hablar con ${a}`, `Hablar con ${a}`, `le pregunto a ${a} qué se cuenta por aquí`, 'Fijarte en lo que está pasando',
+    `me enfrento a ${b}`, 'dejame en paz', 'salto 50 metros por encima del río', 'me siento a escuchar lo que se habla', `le doy las gracias a ${a}`,
+    `le ofrezco a ${b} un poco de mi agua`, `le pregunto a ${b} si hay un curandero`, 'me enfrento a un vecino', 'espero', 'miro alrededor',
+    'sigo a la figura', 'me acerco al puente', `le pregunto a ${a} por la figura del tejado`, 'descanso un rato', 'miro alrededor',
+  ];
+  for (const semilla of [5, 24]) {
+    const m = await crearMotor({ semilla });
+    await m.empezar(FICHA);
+    const [a, b = a] = presentes(m);
+    let previo = null; let trios = 0; let rachas = new Map(); let racha = 0; let corta = 0;
+    const raras = [];
+    let usadaVuelve = 0;
+    for (const entrada of GUION(a, b)) {
+      const t = visible(await m.jugar(entrada));
+      const ops = opciones(m);
+      const clave = ops.join(' | ');
+      if (clave === previo) trios += 1;
+      previo = clave;
+      const nuevas = new Map();
+      for (const o of ops) { const n = (rachas.get(o) ?? 0) + 1; nuevas.set(o, n); racha = Math.max(racha, n); }
+      rachas = nuevas;
+      if (/(^|\n)¿Qué haces\?$/.test(t.trim())) corta += 1;
+      for (const o of ops) {
+        const mismo = o.match(/^Preguntar a (\p{Lu}\p{Ll}+) por (\p{Lu}\p{Ll}+)$/u);
+        if ((mismo && mismo[1] === mismo[2]) || /^Hablar$/.test(o)) raras.push(o);
+      }
+      // Lo que se acaba de hacer con otras palabras no se vuelve a proponer.
+      if (/qué se cuenta/.test(entrada) && ops.some((o) => new RegExp(`^Preguntar a ${a} qué se cuenta`).test(o))) usadaVuelve += 1;
+      if (/«[^»]*\?[^»]*»$/.test(t.trim().split('\n').at(-2) ?? '') && /¿Qué haces\?$/.test(t.trim())) raras.push(`cierre tras pregunta: ${entrada}`);
+      if (/¿Qué haces\?\nCierra/.test(t)) raras.push('aviso del mundo tras el cierre');
+    }
+    comprobar(trios <= 3 && racha <= 3, `semilla ${semilla}: el mismo trío que el turno anterior en ${trios}/20 turnos, una sugerencia como mucho ${racha} turnos seguidos (≤ 3 y ≤ 3)`);
+    comprobar(corta <= 12, `semilla ${semilla}: «¿Qué haces?» a secas cierra ${corta}/20 turnos (≤ 12); si hay trama, pregunta por ella`);
+    comprobar(!raras.length && !usadaVuelve, `semilla ${semilla}: sin «Preguntar a X por X», «Hablar» a secas, lo recién hecho otra vez ni cierres encima de una pregunta`, [...raras, usadaVuelve ? 'vuelve «qué se cuenta» recién preguntado' : ''].join(' | '));
+  }
+}
+
 console.log(`\n${casos - fallos}/${casos} comprobaciones`);
 console.log(fallos ? `\n${fallos} fallos.` : '\nTodo bien.');
 process.exitCode = fallos ? 1 : 0;

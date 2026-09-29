@@ -449,13 +449,17 @@ export class ProceduralProvider extends IDMProvider {
 
     // Lo que el jugador ha nombrado jugando, al final: es suyo, pero no se le
     // empuja hacia ello.
-    const quien = charla ?? presentes[0];
     const suyo = (ctx.canon ?? []).filter((c) => c.menciones >= 2 && c.origen !== 'importado');
     for (const c of suyo.slice(0, 1)) {
-      if (c.tipo === 'persona' && quien?.nombre) candidatas.push({ label: `Preguntar a ${quien.nombre} por ${c.nombre}`, intent: 'talk', risk: 'low' });
+      // A otro, no a él mismo: salía «Preguntar a Cordan por Cordan».
+      const mismo = (p) => sinAcentos(String(p?.nombre ?? '').toLowerCase()) === sinAcentos(String(c.nombre ?? '').toLowerCase());
+      const quien = [charla, ...presentes].find((p) => p?.nombre && !mismo(p));
+      if (c.tipo === 'persona' && quien) candidatas.push({ label: `Preguntar a ${quien.nombre} por ${c.nombre}`, intent: 'talk', risk: 'low' });
     }
 
-    candidatas.push(...base);
+    // El catálogo detrás. «Hablar» a secas no dice con quién: con gente
+    // delante ya se propone «Hablar con…» por su nombre, o de qué hablar.
+    candidatas.push(...base.filter((b) => !/^hablar$/i.test(String(b.label ?? '').trim())));
 
     // Lo que está pasando y la conversación, alternados: si se habla con
     // alguien, entre las tres visibles hay al menos un tema para él.
