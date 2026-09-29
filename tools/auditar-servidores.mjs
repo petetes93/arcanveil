@@ -263,14 +263,44 @@ console.log('\n── gemini-proxy.mjs: host, origen, modelo y topes ──');
   falsoGemini.close();
 }
 
-console.log('\n── Puertos ──');
+console.log('\n── Puertos: cada cliente con su puente, y si no, se nota ──');
 {
+  // Los contratos vivos, importados: no un literal leído de un archivo que
+  // puede desaparecer (esta sección leía src/art/retrato-local.js, borrado
+  // en esta rama, y la suite se caía con ENOENT antes del total).
   const { crearProxyGroq } = await import('./groq-proxy.mjs');
-  const src = (await import('node:fs')).readFileSync(join(RAIZ, 'tools', 'groq-proxy.mjs'), 'utf8');
-  const puertoGroq = Number(src.match(/puerto = (\d+)/)?.[1]);
-  comprobar(puertoGroq === 11436 && PUERTO_IMAGEN === 11437 && typeof crearProxyGroq === 'function', `Groq en ${puertoGroq}, imagen en ${PUERTO_IMAGEN}: no chocan`);
-  const cliente = (await import('node:fs')).readFileSync(join(RAIZ, 'src', 'art', 'retrato-local.js'), 'utf8');
-  comprobar(/^const ORIGEN = 'http:\/\/127\.0\.0\.1:11437';$/m.test(cliente), 'el cliente de imagen apunta al 11437');
+  const { URL_PUENTE_GROQ, GroqProvider } = await import('../src/ai/providers/GroqProvider.js');
+  const { ORIGEN_GENERADOR, estadoGenerador } = await import('../src/art/candidata.js');
+  const puertoGroq = Number(new URL(URL_PUENTE_GROQ).port);
+  const puertoCliente = Number(new URL(ORIGEN_GENERADOR).port);
+  comprobar(puertoCliente === PUERTO_IMAGEN && puertoGroq === 11436 && puertoGroq !== PUERTO_IMAGEN,
+    `el cliente de imagen apunta al puerto del puente de imagen (${puertoCliente} = ${PUERTO_IMAGEN}) y no al de Groq (${puertoGroq})`);
+
+  // Cruzados, con los dos puentes de verdad: si uno contesta donde se
+  // esperaba el otro, cada cliente lo reconoce como «otro servicio».
+  const ORIGEN = 'http://localhost:8080';
+  const cacheCruce = mkdtempSync(join(tmpdir(), 'arcanveil-cruce-'));
+  const imagen = crearProxyImagen({ origen: ORIGEN, puerto: 0, cache: cacheCruce, proveedor: { id: 'falso', salud: async () => ({ disponible: true }), generar: async () => { throw new Error('no debe generar'); } } });
+  const groq = crearProxyGroq({ clave: 'gsk-doble-de-pruebas-sin-valor-0000000000', puerto: 0, origen: ORIGEN, upstream: 'http://127.0.0.1:9/v1', rutaUso: null });
+  const [pImagen, pGroq] = [await imagen.escuchar(), await groq.escuchar()];
+  const desvio = (hacia, pagina = ORIGEN) => async (url, op = {}) => {
+    const u = new URL(url); u.port = String(hacia);
+    const r = await fetch(u, { ...op, headers: { ...(op.headers ?? {}), Origin: pagina } });
+    if (op.mode === 'no-cors') return { type: 'opaque' };
+    if (r.headers.get('access-control-allow-origin') !== pagina) throw new TypeError('Failed to fetch');
+    return r;
+  };
+  const alGroq = await estadoGenerador({ fetch: desvio(pGroq) });
+  comprobar(!alGroq.ok && alGroq.causa === 'otro_servicio', 'el cliente de imagen, contra el puente de Groq: «otro servicio», no pinta', alGroq.motivo);
+  const proveedor = new GroqProvider({ fetch: desvio(pImagen) });
+  const aImagen = await proveedor.probar();
+  comprobar(!aImagen.ok && aImagen.causa === 'otro_servicio', 'el proveedor de Groq, contra el puente de imagen: «otro servicio», no «cuenta sin modelo»', aImagen.motivo);
+  const bien = await estadoGenerador({ fetch: desvio(pImagen, 'http://127.0.0.1:8080') });
+  const ajeno = await estadoGenerador({ fetch: desvio(pImagen, 'https://web-ajena.example') });
+  comprobar(bien.ok && !ajeno.ok, 'el puente de imagen admite la app por sus dos nombres y rechaza otro origen');
+  await imagen.cerrar();
+  await groq.cerrar();
+  rmSync(cacheCruce, { recursive: true, force: true });
 }
 
 console.log(`\n${casos - fallos}/${casos} comprobaciones`);
