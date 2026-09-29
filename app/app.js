@@ -960,13 +960,26 @@ function abrirAjustes() {
     el('div', { class: 'ajuste' },
       el('p', { class: 'sub-eti', text: 'Datos' }),
       el('button', {
-        class: 'btn btn--peligro',
-        onClick: protegido('borrar datos', () => {
-          if (!confirm('¿Borrar todas las partidas y personajes guardados en este navegador?')) return;
+        class: 'btn btn--peligro', id: 'ajustes-borrar',
+        onClick: protegido('borrar datos', async () => {
+          if (!confirm('¿Borrar todas las partidas, personajes y retratos elegidos guardados en este navegador?')) return;
           sistema('saves')?.borrarTodo?.();
           try { Object.keys(localStorage).filter((k) => k.startsWith('arcanveil:')).forEach((k) => localStorage.removeItem(k)); } catch { /* nada */ }
+          // Los retratos elegidos viven en IndexedDB: se esperan, y si el
+          // navegador no deja, se dice. Antes se quedaban y volvían al recargar.
+          const galeria = await borrarGaleria();
+          // Las candidatas del generador están en otro programa de este PC: se
+          // piden borrar; si no está en marcha, se dice cómo.
+          const puente = await olvidarCandidatas({ todas: true });
           $('#ajustes-modal').hidden = true;
           pintarInicio();
+          if (!galeria.ok) {
+            avisar(`Partidas y personajes borrados, pero no los retratos elegidos: ${galeria.motivo}. Prueba otra vez.`, 'aviso');
+            return;
+          }
+          avisar(puente.ok
+            ? 'Borrados partidas, personajes, retratos elegidos y las candidatas del generador.'
+            : 'Borrados partidas, personajes y retratos elegidos. Si usaste el generador de imágenes, sus candidatas (en este PC) caducan en 24 h o se borran con: node tools/imagen-local-proxy.mjs --limpiar', puente.ok ? 'exito' : 'info');
         }),
       }, 'Borrar partidas y personajes'),
     ),

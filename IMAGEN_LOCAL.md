@@ -2,11 +2,19 @@
 
 ARCANVEIL no pide imágenes por su cuenta. Un retrato se pinta **cuando lo pides** («Pintar retrato» al crear el personaje, en la ficha o en cada compañero; nunca en combate) y **solo se queda si lo eliges**:
 
-1. «Pintar» pide una candidata al generador de tu PC. Se ve en una ventana aparte y es privada: no se guarda ni se envía a ningún sitio.
-2. «Otra versión» pide otra (otra semilla, el mismo encargo).
+1. «Pintar» pide una candidata al generador. Se ve en una ventana aparte (el estudio) y no aparece en la ficha, el grupo, el combate ni la bitácora mientras no la elijas.
+2. «Otra versión» pide otra (otra semilla, el mismo encargo). No sustituye la que ya elegiste.
 3. «Usar esta versión» la guarda en el navegador (IndexedDB) y pasa a verse en la ficha, el grupo y el combate. Sigue ahí al recargar y sin red.
 
 Mientras no eliges ninguna, se ve un marcador con la inicial y el nombre. Los enemigos usan su imagen elegida, la ilustración que trae el juego si la hay, o el marcador. No hay servicio de fuera de respaldo: sin generador, se juega igual.
+
+## Qué sale, qué se guarda y cómo se borra
+
+El estudio lo dice antes de pintar, según el proveedor del puente:
+
+- **Qué se envía.** Con ComfyUI, la descripción en inglés (el sujeto, sin historia ni secretos) va de la app al puente y del puente a ComfyUI, todo en tu PC: no sale del equipo. Con un proveedor en la nube (Cloudflare, preparado y **no activado**), esa descripción sí sale hacia el servicio: el estudio la enseña tal cual y no pinta hasta que marcas el permiso.
+- **Candidatas.** El puente las guarda en una caché temporal de tu PC (`%LOCALAPPDATA%\arcanveil\imagenes`) para que volver a una versión no la pinte otra vez. Se borran al cerrar el estudio (elijas o no), caducan a las 24 h y no pasan de 40. ComfyUI deja las suyas en su carpeta temporal, que vacía al cerrarse. Para vaciar la caché del puente a mano: `node tools/imagen-local-proxy.mjs --limpiar`.
+- **Elegidas.** Solo la versión que eliges pasa al navegador. «Ajustes › Borrar partidas y personajes» borra también todos los retratos elegidos y pide al puente que borre sus candidatas; si el puente no está en marcha, lo dice y recuerda el `--limpiar`.
 
 ## Preparar el generador (Windows)
 
@@ -24,7 +32,7 @@ Después abre ComfyUI, que debe responder en `http://127.0.0.1:8188`, y desde la
 node tools/imagen-local-proxy.mjs
 ```
 
-Abre ARCANVEIL (en `http://localhost:8080` o `http://127.0.0.1:8080`: el puente acepta los dos nombres de tu equipo) y pulsa «Pintar retrato». Si algo falta, el estudio lo dice: sin puente, puente sin ComfyUI, otro programa en el puerto o el puente arrancado para otra dirección. La primera generación tarda más; repetir la misma versión sale de `%LOCALAPPDATA%\arcanveil\imagenes`.
+Abre ARCANVEIL (en `http://localhost:8080` o `http://127.0.0.1:8080`: el puente acepta los dos nombres de tu equipo) y pulsa «Pintar retrato». Si algo falta, el estudio lo dice: sin puente, puente sin ComfyUI, otro programa en el puerto o el puente arrancado para otra dirección. La primera generación tarda más; volver a una versión mientras el estudio está abierto sale de la caché del puente.
 
 ## Estilo
 

@@ -70,6 +70,19 @@ console.log('\n── Galería: lo que el jugador elige ──');
   comprobar(urlAprobada('enemigo:lobo_ceniciento') === null, 'lo que no se ha elegido no tiene imagen (se verá el marcador)');
   await olvidar('enemigo:saqueador');
   comprobar(urlAprobada('enemigo:saqueador') === null, 'y olvidarla la quita');
+
+  // «Borrar partidas y personajes» vaciaba localStorage y dejaba las
+  // imágenes: al recargar volvían. (La base de verdad, IndexedDB, se prueba
+  // en Chrome: tools/regresion-app.mjs.)
+  await aprobar('pj:pj_a', img, { estilo: 'e', tipo: 'personaje' });
+  await aprobar('pnj:npc_b', img, { estilo: 'e', tipo: 'pnj' });
+  avisos.length = 0;
+  const b = await borrarGaleria();
+  comprobar(b.ok && b.borradas === 2 && !urlAprobada('pj:pj_a') && !urlAprobada('pnj:npc_b') && avisos.includes(null), 'borrar la galería quita todas las elegidas y avisa para repintar marcadores');
+  await aprobar('pj:pj_c', img, { estilo: 'e', tipo: 'personaje' });
+  borrarPersonaje('pj_c');
+  await new Promise((ok) => setTimeout(ok, 10));
+  comprobar(!urlAprobada('pj:pj_c'), 'borrar un personaje olvida también su retrato elegido');
   dejar();
 }
 

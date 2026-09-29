@@ -74,6 +74,7 @@ let serverErr = ''; server.stderr.on('data', d => { serverErr += d; });
 const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 const generadas = [];
 let estudio = 'sin probar';
+let borrado = 'sin probar';
 let puenteImagen = null;
 const cacheImagen = await mkdtemp(join(tmpdir(), 'arcanveil-imagenes-'));
 if (!sinIA) {
@@ -772,6 +773,28 @@ try {
     await evaluate(`document.querySelector('#menu-nueva').click()`);
     await until('document.querySelector("img.arte--aprobada")?.complete && document.querySelector("img.arte--aprobada").naturalWidth > 0', 8000);
     await shot(`06-retrato-sin-red-${viewport.label}.png`);
+
+    // «Borrar partidas y personajes»: también los retratos elegidos (antes se
+    // quedaban en IndexedDB y volvían al recargar) y las candidatas del
+    // puente. Lo que no es del juego no se toca.
+    await cdp('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await evaluate(`localStorage.setItem('otro-juego:dato', 'sigue'); new Promise((ok) => { const p = indexedDB.open('otra-base', 1); p.onupgradeneeded = () => p.result.createObjectStore('x'); p.onsuccess = () => { const t = p.result.transaction('x', 'readwrite'); t.objectStore('x').put('sigue', 'k'); t.oncomplete = () => { p.result.close(); ok(true); }; }; })`);
+    escribirSync(join(cacheImagen, 'pnj_npc_x__prueba.img'), 'candidata de prueba');
+    await cdp('Page.reload', { ignoreCache: false });
+    await until('window.ARCANVEIL?.motor?.listo && document.body.classList.contains("esta-listo")', 15000);
+    await evaluate(`window.confirm = () => true; document.querySelector('#inicio-jugar')?.click()`);
+    await until('document.querySelector("#menu-ajustes") && !document.querySelector("#menu-ajustes").closest("[hidden]")', 5000);
+    await evaluate(`document.querySelector('#menu-ajustes').click()`);
+    await until('document.querySelector("#ajustes-borrar")', 5000);
+    await evaluate(`document.querySelector('#ajustes-borrar').click()`);
+    await until('/Borrados partidas/.test(document.body.textContent)', 8000);
+    const tras = { galeria: await evaluate(GALERIA), candidatas: enCache() };
+    if (tras.galeria.length || tras.candidatas.length) throw new Error(`«Borrar partidas y personajes» dejó imágenes: ${JSON.stringify(tras)}`);
+    await cdp('Page.reload', { ignoreCache: false });
+    await until('window.ARCANVEIL?.motor?.listo && document.body.classList.contains("esta-listo")', 15000);
+    const recargado = await evaluate(`(async () => ({ galeria: await ${GALERIA}, ajeno: localStorage.getItem('otro-juego:dato'), otraBase: await new Promise((ok) => { const p = indexedDB.open('otra-base', 1); p.onsuccess = () => { const q = p.result.transaction('x').objectStore('x').get('k'); q.onsuccess = () => { p.result.close(); ok(q.result); }; }; }), personajes: localStorage.getItem('arcanveil:personajes') }))()`);
+    if (recargado.galeria.length || recargado.ajeno !== 'sigue' || recargado.otraBase !== 'sigue' || recargado.personajes) throw new Error(`tras borrar y recargar: ${JSON.stringify(recargado)}`);
+    borrado = 'galería y candidatas vacías tras recargar; lo ajeno intacto';
   }
 
   if (externos.length) throw new Error(`la página pidió cosas fuera de este equipo: ${[...new Set(externos)].slice(0, 5).join(' · ')}`);
@@ -783,6 +806,7 @@ try {
     offlineScreen: offline.screen, failures: offline.failures,
     retrato: libre.aprobado ? 'elegido' : 'marcador',
     estudio,
+    borrado,
     externos: externos.length,
     sinIA,
   };

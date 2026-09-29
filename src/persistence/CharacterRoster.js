@@ -14,15 +14,17 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
+import { olvidar, claveDe } from '../art/galeria.js';
+
 const CLAVE = 'arcanveil:personajes';
 const MAXIMO = 24;
 
 /** Campos que definen al personaje. Nada de progreso ni de estado de partida. */
-// `retratoIA` es la URL del retrato que ya se sabe que carga. No es progreso
-// de partida: es parte de quién es el personaje, igual que su descripción.
-// Guardarla evita que al volver a abrir el juego el panel lateral enseñe el
-// retrato vectorial mientras la imagen buena da otra vuelta por la red.
-const CAMPOS = ['id', 'nombre', 'raza', 'clase', 'trasfondo', 'genero', 'retrato', 'lore', 'creado', 'retratoIA', 'semillaRetrato', 'intensidad'];
+// El retrato elegido vive en la galería del navegador (src/art/galeria.js),
+// con clave `pj:<id>`. `retratoIA` (una URL de un servicio de fuera) y
+// `semillaRetrato` ya no se usan y dejan de guardarse: al volver a guardar
+// un personaje antiguo, desaparecen.
+const CAMPOS = ['id', 'nombre', 'raza', 'clase', 'trasfondo', 'genero', 'retrato', 'lore', 'creado', 'intensidad'];
 
 function leerCrudo() {
   try {
@@ -69,8 +71,14 @@ export function guardarPersonaje(datos) {
   return ficha;
 }
 
-/** @param {string} id */
+/**
+ * Borra un personaje, y con él su retrato elegido: sin esto la imagen se
+ * quedaba en la galería sin dueño.
+ * @param {string} id
+ */
 export function borrarPersonaje(id) {
+  const clave = claveDe({ tipo: 'personaje', id });
+  if (clave) olvidar(clave);
   return escribir(leerCrudo().filter((p) => p.id !== id));
 }
 
