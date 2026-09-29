@@ -368,6 +368,9 @@ button{font-family:inherit;cursor:pointer}
 .estudio::backdrop{background:rgba(0,0,0,.7)}
 .estudio__titulo{margin:0 0 .3rem;font:600 1.1rem var(--display);color:var(--oro)}
 .estudio__nota{margin:0;font-size:.78rem;color:var(--texto-3)}
+.estudio__permiso{display:flex;gap:.5rem;align-items:flex-start;margin:.6rem 0 0;padding:.5rem .6rem;border:1px solid var(--aviso);border-radius:var(--r);font-size:.8rem;color:var(--texto)}
+.estudio__permiso[hidden]{display:none}
+.estudio__permiso input{margin-top:.2rem;min-width:18px;min-height:18px}
 .estudio__lienzo{position:relative;width:min(70vw,280px);aspect-ratio:4/5;margin:.8rem auto .4rem;overflow:hidden;border:1px solid var(--linea);border-radius:var(--r)}
 .estudio__lienzo>.arte{position:absolute;inset:0;object-fit:cover}
 .estudio__lienzo[data-estado="generando"]{animation:estudioRespira 1.6s ease-in-out infinite}

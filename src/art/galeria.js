@@ -158,6 +158,31 @@ export async function olvidar(clave) {
   avisar(clave);
 }
 
+/**
+ * Borra TODA la galería: cada imagen elegida, en el navegador y en memoria.
+ *
+ * «Borrar partidas y personajes» vaciaba localStorage y dejaba aquí las
+ * imágenes: al recargar volvían. Se vacía el almacén con una transacción y
+ * se espera a que el navegador la confirme (borrar la base entera quedaría
+ * bloqueado si hay otra pestaña del juego abierta). Solo después se dice
+ * que está hecho.
+ *
+ * @returns {Promise<{ok: boolean, borradas: number, motivo?: string}>}
+ */
+export async function borrarGaleria() {
+  const borradas = enMemoria.size;
+  const db = await abrirBase();
+  if (db) {
+    try { await transaccion(db, 'readwrite', (s) => s.clear()); } catch (e) {
+      return { ok: false, borradas: 0, motivo: `el navegador no dejó borrar las imágenes (${e?.name ?? 'error'})` };
+    }
+  }
+  for (const r of enMemoria.values()) soltar(r.url);
+  enMemoria.clear();
+  avisar(null);
+  return { ok: true, borradas };
+}
+
 /** @returns {Array<{clave: string, estilo: string, tipo: string, nombre: string}>} */
 export function listarAprobadas() {
   return [...enMemoria].map(([clave, r]) => ({ clave, estilo: r.estilo, tipo: r.tipo, nombre: r.nombre }));
@@ -181,4 +206,4 @@ export function _reiniciarGaleria() {
   cargada = null;
 }
 
-export default { claveDe, abrirGaleria, urlAprobada, aprobar, olvidar, listarAprobadas, alCambiarGaleria, TAM_MAX_APROBADA };
+export default { claveDe, abrirGaleria, urlAprobada, aprobar, olvidar, borrarGaleria, listarAprobadas, alCambiarGaleria, TAM_MAX_APROBADA };

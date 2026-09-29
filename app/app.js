@@ -53,8 +53,8 @@ import {
   pintarLugar, pintarRetrato, pintarCriatura, cargarManifiesto,
   especieNombrada, claveRetrato,
 } from '../src/art/index.js';
-import { abrirGaleria, aprobar, alCambiarGaleria, urlAprobada } from '../src/art/galeria.js';
-import { pedirCandidata, estadoGenerador } from '../src/art/candidata.js';
+import { abrirGaleria, aprobar, alCambiarGaleria, urlAprobada, borrarGaleria } from '../src/art/galeria.js';
+import { pedirCandidata, estadoGenerador, olvidarCandidatas } from '../src/art/candidata.js';
 import { sujetoRetrato } from '../src/art/rasgos.js';
 import { obtenerEnemigo } from '../src/data/enemies.data.js';
 
@@ -1198,9 +1198,13 @@ const variantes = new Map();
  * El estudio: pintar, ver la candidata en privado, pedir otra versión y,
  * solo si el jugador quiere, quedársela.
  *
- * Nada se pinta sin que el jugador lo pida. La candidata vive en esta
- * ventana y se tira al cerrarla; solo «Usar esta versión» la guarda en la
- * galería del navegador (ver `src/art/galeria.js`). Nunca en combate.
+ * Nada se pinta sin que el jugador lo pida. Qué pasa con lo pedido se dice
+ * antes de pintar, según el proveedor del puente: con ComfyUI no sale del
+ * PC; con uno en la nube se enseña lo que viaja y hay que permitirlo. Las
+ * candidatas quedan en la caché temporal del puente mientras el estudio está
+ * abierto (volver a una versión no la repinta) y se olvidan al cerrarlo;
+ * solo «Usar esta versión» guarda una en la galería del navegador (ver
+ * `src/art/galeria.js`). Nunca en combate.
  *
  * @param {{tipo: string, clave: string, nombre: string, descripcion: string, rol?: string}} encargo
  * @param {{alTerminar?: Function}} [op]
@@ -1227,16 +1231,24 @@ function abrirEstudio(encargo, { alTerminar } = {}) {
   const otra = el('button', { class: 'btn btn--fantasma', id: 'estudio-otra', type: 'button', hidden: true }, 'Otra versión');
   const usar = el('button', { class: 'btn', id: 'estudio-usar', type: 'button', hidden: true }, 'Usar esta versión');
   const cerrar = el('button', { class: 'btn btn--fantasma', id: 'estudio-cerrar', type: 'button' }, 'Cerrar');
+  const nota = el('p', { class: 'estudio__nota', id: 'estudio-nota', text: 'Mirando qué generador hay…' });
+  // Solo con un proveedor en la nube: permiso expreso antes de enviar nada.
+  const permiso = el('input', { type: 'checkbox', id: 'estudio-permiso' });
+  const cajaPermiso = el('label', { class: 'estudio__permiso', for: 'estudio-permiso', hidden: true }, permiso, el('span', { id: 'estudio-permiso-texto' }));
 
-  const dialogo = el('dialog', { class: 'estudio', id: 'estudio', 'aria-labelledby': 'estudio-titulo' },
+  const dialogo = el('dialog', { class: 'estudio', id: 'estudio', 'aria-labelledby': 'estudio-titulo', 'aria-describedby': 'estudio-nota' },
     el('h2', { class: 'estudio__titulo', id: 'estudio-titulo', text: `Retrato de ${encargo.nombre || 'tu personaje'}` }),
-    el('p', { class: 'estudio__nota', text: 'Se pinta en tu equipo. Lo que salga es privado: no se guarda ni se envía a ningún sitio hasta que elijas una versión.' }),
+    nota, cajaPermiso,
     lienzo, estado,
     el('div', { class: 'estudio__acciones' }, pintar, otra, usar, cerrar),
   );
 
   const soltar = () => { if (candidata?.url) URL.revokeObjectURL(candidata.url); candidata = null; };
-  const ocupado = (si) => { for (const b of [pintar, otra, usar]) b.disabled = si; };
+  let necesitaPermiso = false;
+  const ocupado = (si) => {
+    for (const b of [pintar, otra, usar]) b.disabled = si;
+    if (!si && necesitaPermiso && !permiso.checked) { pintar.disabled = true; otra.disabled = true; }
+  };
   const actual = () => {
     // Lo que hay ahora: su retrato elegido, o el marcador.
     pintarRetrato(lienzo, { claveImagen: encargo.clave, nombre: encargo.nombre });
@@ -1280,7 +1292,12 @@ function abrirEstudio(encargo, { alTerminar } = {}) {
     refrescarTodo();
   }));
   cerrar.addEventListener('click', () => dialogo.close());
-  dialogo.addEventListener('close', () => { control.abort(); soltar(); dialogo.remove(); });
+  dialogo.addEventListener('close', () => {
+    control.abort(); soltar(); dialogo.remove();
+    // Terminado de valorar: las candidatas de este personaje se borran del
+    // puente. La elegida, si la hay, ya está en la galería.
+    olvidarCandidatas({ clave: encargo.clave });
+  });
 
   document.body.append(dialogo);
   actual();
@@ -1292,10 +1309,22 @@ function abrirEstudio(encargo, { alTerminar } = {}) {
   estadoGenerador().then((g) => {
     if (!dialogo.isConnected) return;
     estilo = g.estilo ?? null;
+    const horas = g.cache?.horas ?? 24;
+    nota.textContent = g.envia === 'local'
+      ? `Se pinta en este PC con ${g.proveedor === 'comfyui' ? 'ComfyUI' : 'el generador local'}: la descripción no sale del equipo. Mientras eliges, las versiones quedan en una caché temporal del puente, en este PC; se borran al cerrar esta ventana (y como tarde a las ${horas} h). Solo la versión que elijas se guarda en el juego.`
+      : `Este puente pinta con un servicio en la nube (${g.proveedor ?? 'desconocido'}): la descripción en inglés sale de tu equipo hacia ese servicio. Las versiones quedan en una caché temporal del puente, en este PC, hasta que cierres esta ventana; solo la que elijas se guarda en el juego.`;
     if (!g.ok) { estado.textContent = g.motivo; pintar.disabled = true; return; }
     if ((encargo.descripcion ?? '').length < 8) { estado.textContent = 'Hace falta una descripción de su aspecto para pintarlo.'; pintar.disabled = true; return; }
     estado.textContent = urlAprobada(encargo.clave) ? 'Este es el que elegiste. Pinta otro si quieres cambiarlo.' : 'Listo para pintar.';
     ocupado(false);
+    if (g.envia !== 'local') {
+      // Qué viaja, tal cual, y pintar solo con permiso.
+      $('#estudio-permiso-texto').textContent = ` Permito enviar a ${g.proveedor ?? 'ese servicio'}: «${encargo.descripcion}».`;
+      cajaPermiso.hidden = false;
+      necesitaPermiso = true;
+      permiso.addEventListener('change', () => ocupado(false));
+      ocupado(false);
+    }
   });
 }
 

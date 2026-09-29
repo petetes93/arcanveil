@@ -2,7 +2,7 @@
 /** Regresión real de la PWA en Chrome, sin dependencias externas. */
 import { spawn, spawnSync } from 'node:child_process';
 import { writeFile, mkdtemp, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync as escribirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { sujetoRetrato as encargoRetrato } from '../src/art/rasgos.js';
@@ -84,6 +84,15 @@ if (!sinIA) {
   });
   puenteImagen = await candidato.escuchar().then(() => candidato, () => null);
 }
+/** Candidatas que el puente tiene en disco (de un dueño, o todas). */
+const enCache = (prefijo = '') => { try { return readdirSync(cacheImagen).filter((n) => n.endsWith('.img') && n.startsWith(prefijo)); } catch { return []; } };
+async function esperarCache(cond, ms = 8000) {
+  const t0 = Date.now();
+  while (!cond() && Date.now() - t0 < ms) await new Promise((ok) => setTimeout(ok, 100));
+  return cond();
+}
+/** Claves y fechas de lo que hay en la galería del navegador. */
+const GALERIA = `new Promise((ok) => { const p = indexedDB.open('arcanveil-imagenes'); p.onsuccess = () => { const d = p.result; if (!d.objectStoreNames.contains('aprobadas')) { d.close(); return ok([]); } const q = d.transaction('aprobadas').objectStore('aprobadas').getAll(); q.onsuccess = () => { d.close(); ok(q.result.map((x) => ({ clave: x.clave, creada: x.creada }))); }; q.onerror = () => ok([]); }; p.onerror = () => ok([]); })`;
 const pararPuenteImagen = async () => {
   if (puenteImagen) await puenteImagen.cerrar().catch(() => {});
   await rm(cacheImagen, { recursive: true, force: true }).catch(() => {});
@@ -432,17 +441,57 @@ try {
     estudio = 'sin generador: lo dice y no pinta';
   } else if (puenteImagen) {
     await until('/Listo para pintar/.test(document.querySelector(".estudio__estado")?.textContent ?? "")', 8000);
+    // Lo que dice antes de pintar es lo que pasa: con el generador local la
+    // descripción no sale del PC, y las versiones quedan en una caché del
+    // puente hasta cerrar. Antes decía «no se guarda ni se envía».
+    const nota = await evaluate(`document.querySelector('#estudio-nota').textContent`);
+    if (!/no sale del equipo/.test(nota) || !/caché temporal/.test(nota) || /no se guarda ni se envía/.test(nota)) throw new Error(`la nota del estudio no dice lo que pasa: «${nota}»`);
     await evaluate(`document.querySelector('#estudio-pintar').click()`);
     await until('document.querySelector("#estudio .estudio__candidata")?.complete', 10000);
-    const primera = await evaluate(`({ texto: document.querySelector('.estudio__estado').textContent, enFicha: Boolean(document.querySelector('#retrato-pj img.arte--aprobada')) })`);
-    if (primera.enFicha) throw new Error('la candidata salió en la ficha antes de elegirla');
+    const primera = await evaluate(`(async () => ({ enFicha: Boolean(document.querySelector('#retrato-pj img.arte--aprobada')), galeria: await ${GALERIA} }))()`);
+    if (primera.enFicha || primera.galeria.length) throw new Error(`la candidata salió antes de elegirla: ${JSON.stringify(primera)}`);
+    if (enCache('pj_').length !== 1) throw new Error(`tras pintar, el puente tendría que tener una candidata en su caché: ${enCache().join(' ')}`);
     await evaluate(`document.querySelector('#estudio-otra').click()`);
     await until('/Versión 2/.test(document.querySelector(".estudio__estado")?.textContent ?? "")', 10000);
+    if (enCache('pj_').length !== 2 || (await evaluate(GALERIA)).length) throw new Error('«Otra versión»: dos candidatas en caché y nada en la galería');
     await shot(`05-estudio-${viewport.label}.png`);
     await evaluate(`document.querySelector('#estudio-usar').click()`);
     await until('!document.querySelector("#estudio") && document.querySelector("#retrato-pj img.arte--aprobada")?.complete', 8000);
     if (generadas.length !== 2 || generadas[0] === generadas[1]) throw new Error(`el estudio no pidió dos versiones distintas: ${JSON.stringify(generadas)}`);
-    estudio = 'pintar, otra versión y usar: en la ficha';
+    if (!(await esperarCache(() => enCache().length === 0))) throw new Error(`al cerrar el estudio, las candidatas siguen en la caché del puente: ${enCache().join(' ')}`);
+    const elegida = await evaluate(GALERIA);
+    if (elegida.length !== 1 || !/^pj:/.test(elegida[0].clave)) throw new Error(`la versión elegida no está sola en la galería: ${JSON.stringify(elegida)}`);
+    const srcElegida = await evaluate(`document.querySelector('#retrato-pj img.arte--aprobada').src`);
+
+    // Otra vez al estudio: pintar y cerrar sin elegir no toca lo elegido.
+    await evaluate(`document.querySelector('#pj-pintar').click()`);
+    await until('/elegiste/.test(document.querySelector(".estudio__estado")?.textContent ?? "")', 8000);
+    await evaluate(`document.querySelector('#estudio-pintar').click()`);
+    await until('document.querySelector("#estudio .estudio__candidata")?.complete', 10000);
+    await evaluate(`document.querySelector('#estudio-cerrar').click()`);
+    await until('!document.querySelector("#estudio")', 5000);
+    if (!(await esperarCache(() => enCache().length === 0))) throw new Error('cerrar sin elegir dejó la candidata en la caché del puente');
+    const despues = await evaluate(GALERIA);
+    const srcDespues = await evaluate(`document.querySelector('#retrato-pj img.arte--aprobada')?.src`);
+    if (JSON.stringify(despues) !== JSON.stringify(elegida) || srcDespues !== srcElegida) throw new Error('una versión rechazada cambió el retrato elegido');
+
+    // Con un proveedor en la nube, el estudio dice que el encargo sale del PC
+    // y no pinta sin permiso. (Un doble con el nombre del proveedor: nada real.)
+    await puenteImagen.cerrar();
+    const nube = crearProxyImagen({ origen: `http://127.0.0.1:${PORT}`, cache: cacheImagen, proveedor: { id: 'cloudflare', salud: async () => ({ disponible: true }), generar: async ({ semilla }) => { generadas.push(semilla); return { bytes: PNG_1X1, tipo: 'image/png' }; } } });
+    puenteImagen = await nube.escuchar().then(() => nube, () => null);
+    if (!puenteImagen) throw new Error('no se pudo levantar el doble de nube en 11437');
+    const antesNube = generadas.length;
+    await evaluate(`document.querySelector('#pj-pintar').click()`);
+    await until('/sale de tu equipo/.test(document.querySelector("#estudio-nota")?.textContent ?? "") && !document.querySelector("#estudio-permiso").closest("label").hidden', 8000);
+    const sinPermiso = await evaluate(`document.querySelector('#estudio-pintar').disabled`);
+    await evaluate(`document.querySelector('#estudio-permiso').click()`);
+    const conPermiso = await evaluate(`document.querySelector('#estudio-pintar').disabled`);
+    const textoPermiso = await evaluate(`document.querySelector('#estudio-permiso-texto').textContent`);
+    await shot(`05b-estudio-nube-${viewport.label}.png`);
+    await evaluate(`document.querySelector('#estudio-cerrar').click()`);
+    if (!sinPermiso || conPermiso || !/cloudflare/.test(textoPermiso) || generadas.length !== antesNube) throw new Error(`con la nube, pintar sin permiso: ${JSON.stringify({ sinPermiso, conPermiso, textoPermiso })}`);
+    estudio = 'pintar, otra versión y usar: en la ficha; cerrar olvida; nube con permiso';
   } else {
     await evaluate(`document.querySelector('#estudio-cerrar').click()`);
     estudio = 'omitido: el puerto 11437 lo usa otro programa';

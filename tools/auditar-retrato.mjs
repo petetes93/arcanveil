@@ -28,13 +28,14 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { readFileSync, readdirSync, statSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, mkdtempSync, rmSync, existsSync, utimesSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { claveDe, aprobar, urlAprobada, olvidar, alCambiarGaleria, abrirGaleria, TAM_MAX_APROBADA } from '../src/art/galeria.js';
-import { pedirCandidata, estadoGenerador } from '../src/art/candidata.js';
+import { claveDe, aprobar, urlAprobada, olvidar, alCambiarGaleria, abrirGaleria, borrarGaleria, TAM_MAX_APROBADA } from '../src/art/galeria.js';
+import { borrarPersonaje } from '../src/persistence/CharacterRoster.js';
+import { pedirCandidata, estadoGenerador, olvidarCandidatas } from '../src/art/candidata.js';
 import { crearProxyImagen } from './imagen-local-proxy.mjs';
 
 let fallos = 0;
@@ -156,6 +157,58 @@ function navegador(pagina = ORIGEN, desvio = puerto) {
 }
 await puente.cerrar();
 rmSync(cache, { recursive: true, force: true });
+
+/* ── Qué se envía y qué queda en disco ─────────────────────────────────── */
+
+console.log('\n── Ciclo de vida de las candidatas ──');
+{
+  // El estudio decía «no se guarda ni se envía a ningún sitio» y el puente
+  // escribía cada candidata en disco antes de aprobarla. Ahora se dice lo
+  // que pasa, y se borra al cerrar el estudio.
+  const carpeta = mkdtempSync(join(tmpdir(), 'arcanveil-ciclo-'));
+  const archivos = () => readdirSync(carpeta).filter((n) => n.endsWith('.img'));
+  const falso = (id) => ({ id, salud: async () => ({ disponible: true }), generar: async () => ({ bytes: PNG, tipo: 'image/png' }) });
+  const p1 = crearProxyImagen({ origen: ORIGEN, puerto: 0, cache: carpeta, proveedor: falso('comfyui'), limites: { porMinuto: 100 } });
+  const q1 = await p1.escuchar();
+  const f1 = navegador(ORIGEN, q1);
+  const e1 = await estadoGenerador({ fetch: f1 });
+  comprobar(e1.envia === 'local' && e1.cache?.horas === 24, 'con ComfyUI el puente dice que no sale del PC, y cuánto dura la caché', JSON.stringify(e1));
+  const pj = { tipo: 'personaje', clave: 'pj:pj_1', descripcion: 'a dwarf woman, a braided beard, red hair' };
+  const otro = { tipo: 'pnj', clave: 'pnj:npc_cordan', descripcion: 'an old innkeeper with a grey beard' };
+  await pedirCandidata(pj, { fetch: f1 });
+  await pedirCandidata(pj, { variante: 1, fetch: f1 });
+  await pedirCandidata(otro, { fetch: f1 });
+  comprobar(archivos().length === 3 && archivos().filter((n) => n.startsWith('pj_pj_1__')).length === 2, 'pintar y «otra versión» dejan su candidata en la caché del puente, con su dueño en el nombre', archivos().join(' '));
+  const o = await olvidarCandidatas({ clave: pj.clave }, { fetch: f1 });
+  comprobar(o.ok && o.borradas === 2 && archivos().length === 1 && archivos()[0].startsWith('pnj_npc_cordan__'), 'cerrar el estudio olvida las de ese personaje y no las de otro', `${o.borradas} · ${archivos().join(' ')}`);
+  const todas = await olvidarCandidatas({ todas: true }, { fetch: f1 });
+  comprobar(todas.ok && archivos().length === 0, '«todas» las borra todas');
+  const ajena = await olvidarCandidatas({ todas: true }, { fetch: navegador('https://web-ajena.example', q1) });
+  comprobar(!ajena.ok, 'otra web no puede mandar borrar');
+  await p1.cerrar();
+
+  // Caducidad y tope.
+  const p2 = crearProxyImagen({ origen: ORIGEN, puerto: 0, cache: carpeta, proveedor: falso('comfyui'), limites: { porMinuto: 100, cacheMax: 2 } });
+  const q2 = await p2.escuchar();
+  for (let v = 0; v < 4; v += 1) await pedirCandidata(pj, { variante: v, fetch: navegador(ORIGEN, q2) });
+  comprobar(archivos().length === 2, `no pasan del tope (${archivos().length} de 4 pedidas, tope 2)`);
+  await p2.cerrar();
+  const viejo = join(carpeta, archivos()[0]);
+  utimesSync(viejo, new Date(Date.now() - 48 * 3600_000), new Date(Date.now() - 48 * 3600_000));
+  const p3 = crearProxyImagen({ origen: ORIGEN, puerto: 0, cache: carpeta, proveedor: falso('comfyui') });
+  await p3.escuchar();
+  await new Promise((ok) => setTimeout(ok, 100));
+  comprobar(!existsSync(viejo) && archivos().length === 1, 'al arrancar, lo de más de 24 h se borra');
+  await p3.cerrar();
+
+  // Un proveedor en la nube: el estudio tiene que saber que el encargo viaja.
+  const p4 = crearProxyImagen({ origen: ORIGEN, puerto: 0, cache: carpeta, proveedor: falso('cloudflare') });
+  const q4 = await p4.escuchar();
+  const e4 = await estadoGenerador({ fetch: navegador(ORIGEN, q4) });
+  comprobar(e4.envia === 'nube', 'con Cloudflare el puente dice que el encargo sale del PC (y el estudio pide permiso)', JSON.stringify(e4));
+  await p4.cerrar();
+  rmSync(carpeta, { recursive: true, force: true });
+}
 
 /* ── Cables trampa ─────────────────────────────────────────────────────── */
 

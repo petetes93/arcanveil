@@ -6,8 +6,12 @@
  *
  * Solo cuando el jugador lo pide («Pintar retrato», «Otra versión»): nunca
  * al repintar, al llegar a un sitio, al encontrarse con alguien ni en
- * combate. Lo que vuelve es una CANDIDATA: se enseña en privado y solo pasa
- * a la galería si el jugador pulsa «Usar esta versión» (ver `galeria.js`).
+ * combate. Lo que vuelve es una CANDIDATA: se enseña en el estudio y solo
+ * pasa a la galería si el jugador pulsa «Usar esta versión» (ver
+ * `galeria.js`). Mientras tanto el puente la guarda en su caché temporal,
+ * en este PC, para no repintar la misma versión; cerrar el estudio la
+ * olvida (`olvidarCandidatas`). Con ComfyUI el encargo no sale del PC; con
+ * un proveedor en la nube, sí (`estadoGenerador().envia`).
  *
  * Habla únicamente con el puente local (127.0.0.1:11437, ver
  * tools/imagen-local-proxy.mjs), que genera con ComfyUI en esta máquina.
@@ -70,8 +74,36 @@ export async function estadoGenerador({ fetch: pedir = globalThis.fetch } = {}) 
   }
   const datos = await r.json().catch(() => ({}));
   if (!SERVICIO.test(String(datos?.servicio ?? ''))) return { ok: false, causa: 'otro_servicio', motivo: MOTIVOS.otro_servicio };
-  if (datos.disponible === false) return { ok: false, causa: 'proveedor', motivo: `${MOTIVOS.proveedor}${datos.motivo ? ` (${datos.motivo})` : ''}`, proveedor: datos.proveedor, estilo: datos.estilo };
-  return { ok: true, causa: null, motivo: null, proveedor: datos.proveedor, estilo: datos.estilo, disponible: true };
+  // Qué pasa con lo pedido: con ComfyUI no sale del PC; con un proveedor en
+  // la nube, el encargo viaja. Un puente viejo que no lo dice cuenta como nube.
+  const envia = datos.envia === 'local' ? 'local' : 'nube';
+  const comun = { proveedor: datos.proveedor, estilo: datos.estilo, envia, cache: datos.cache ?? null };
+  if (datos.disponible === false) return { ok: false, causa: 'proveedor', motivo: `${MOTIVOS.proveedor}${datos.motivo ? ` (${datos.motivo})` : ''}`, ...comun };
+  return { ok: true, causa: null, motivo: null, disponible: true, ...comun };
+}
+
+/**
+ * Olvida las candidatas de un dueño (al cerrar el estudio) o todas (al
+ * borrar partidas). Las que el jugador ya eligió viven en la galería y no se
+ * tocan. Sin puente, no hay nada que hacer aquí: caducan solas.
+ *
+ * @param {{clave?: string, todas?: boolean}} que
+ * @param {{fetch?: Function}} [op]
+ * @returns {Promise<{ok: boolean, borradas: number}>}
+ */
+export async function olvidarCandidatas(que, { fetch: pedir = globalThis.fetch } = {}) {
+  try {
+    const r = await pedir(`${ORIGEN_GENERADOR}/v1/olvidar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify(que?.todas ? { todas: true } : { clave: String(que?.clave ?? '') }),
+    });
+    const datos = await r.json().catch(() => ({}));
+    return { ok: r.ok && SERVICIO.test(String(datos?.servicio ?? '')), borradas: Number(datos?.borradas) || 0 };
+  } catch {
+    return { ok: false, borradas: 0 };
+  }
 }
 
 /**
@@ -136,4 +168,4 @@ export function pedirCandidata(encargo, { variante = 0, signal, fetch: pedir = g
   return promesa;
 }
 
-export default { pedirCandidata, estadoGenerador, MOTIVOS, ORIGEN_GENERADOR };
+export default { pedirCandidata, estadoGenerador, olvidarCandidatas, MOTIVOS, ORIGEN_GENERADOR };

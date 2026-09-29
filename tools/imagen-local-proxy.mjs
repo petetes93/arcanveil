@@ -22,9 +22,16 @@
  *     y si la app se va, se cancela la generación.
  *   · Lo que se envía al proveedor es solo la apariencia (≤ 300 caracteres),
  *     el linaje o el tipo de criatura. Nunca historia, secretos ni partidas.
- *   · Candidatas en caché privada fuera del repositorio
- *     (%LOCALAPPDATA%\arcanveil\imagenes). Ninguna se publica sola: la app
- *     las enseña para aprobar (ver `src/art/retratos.js`).
+ *   · Candidatas: se guardan en una caché TEMPORAL del puente, en este PC
+ *     (%LOCALAPPDATA%\arcanveil\imagenes), para que volver a pedir la misma
+ *     versión no la pinte otra vez. Cada archivo lleva el dueño en el nombre:
+ *     cerrar el estudio las olvida (`POST /v1/olvidar {clave}`), caducan a
+ *     las 24 h, no pasan de 40, «Borrar partidas» las borra todas y
+ *     `node tools/imagen-local-proxy.mjs --limpiar` vacía la carpeta.
+ *     Ninguna se publica sola: la app las enseña para aprobar, y solo la
+ *     elegida pasa al navegador (src/art/galeria.js).
+ *   · ComfyUI deja sus imágenes en su carpeta temporal (nodo PreviewImage),
+ *     no en `output/`; esa carpeta la vacía ComfyUI al cerrarse.
  *
  * ── Proveedores ──────────────────────────────────────────────────────────
  *
@@ -44,7 +51,7 @@
 
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, stat, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -64,7 +71,16 @@ export const LIMITES_IMAGEN = Object.freeze({
   porDia: 60,
   esperaMs: 5 * 60_000,
   maxImagen: 12 * 1024 * 1024,
+  /** Candidatas en caché: cuánto duran y cuántas como mucho. */
+  cacheHoras: 24,
+  cacheMax: 40,
 });
+
+/** Proveedores que no sacan nada del PC. Cualquier otro envía el encargo fuera. */
+const LOCALES = new Set(['comfyui', 'falso']);
+
+/** El dueño de una candidata, apto para nombre de archivo. */
+const prefijoDe = (clave) => `${String(clave).replace(/[^\w.-]/g, '_')}__`;
 
 /* ═══════════════════════════════════════════════════════════════════════════
    EL ENCARGO
@@ -140,7 +156,9 @@ export function proveedorComfy({ url = 'http://127.0.0.1:8188', modelo = 'sd_xl_
         4: { class_type: 'EmptyLatentImage', inputs: { width: ancho, height: alto, batch_size: 1 } },
         5: { class_type: 'KSampler', inputs: { seed: semilla, steps: pasos, cfg, sampler_name: sampler, scheduler, denoise: 1, model: ['1', 0], positive: ['2', 0], negative: ['3', 0], latent_image: ['4', 0] } },
         6: { class_type: 'VAEDecode', inputs: { samples: ['5', 0], vae: ['1', 2] } },
-        7: { class_type: 'SaveImage', inputs: { filename_prefix: 'ARCANVEIL/retrato', images: ['6', 0] } },
+        // PreviewImage: a la carpeta temporal de ComfyUI, que se vacía al
+        // cerrarlo. Con SaveImage cada candidata se quedaba en output/.
+        7: { class_type: 'PreviewImage', inputs: { images: ['6', 0] } },
       };
       const cola = await (await pedir('/prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: grafo }), signal })).json();
       for (;;) {
@@ -219,6 +237,43 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
   const gemelo = origen.includes('//localhost') ? origen.replace('//localhost', '//127.0.0.1') : origen.replace('//127.0.0.1', '//localhost');
   const origenes = new Set([origen, gemelo]);
 
+  /**
+   * Candidatas en disco: caducadas fuera, y si aun así sobran, las más
+   * viejas. Lo que falle al borrar se deja (se intentará en la siguiente).
+   */
+  async function podar() {
+    if (!cache) return;
+    let nombres;
+    try { nombres = (await readdir(cache)).filter((n) => n.endsWith('.img')); } catch { return; }
+    const ahora = Date.now();
+    const vivas = [];
+    for (const n of nombres) {
+      const ruta = join(cache, n);
+      try {
+        const { mtimeMs } = await stat(ruta);
+        if (ahora - mtimeMs > L.cacheHoras * 3600_000) await unlink(ruta);
+        else vivas.push({ ruta, mtimeMs });
+      } catch { /* ya no está */ }
+    }
+    vivas.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    for (const { ruta } of vivas.slice(0, Math.max(0, vivas.length - L.cacheMax))) await unlink(ruta).catch(() => {});
+  }
+
+  /** Olvida las candidatas de un dueño, o todas. @returns {Promise<number>} */
+  async function olvidar({ clave, todas }) {
+    if (!cache) return 0;
+    let nombres;
+    try { nombres = await readdir(cache); } catch { return 0; }
+    const prefijo = todas ? null : prefijoDe(clave);
+    let n = 0;
+    for (const nombre of nombres) {
+      if (!nombre.endsWith('.img') || (prefijo && !nombre.startsWith(prefijo))) continue;
+      try { await unlink(join(cache, nombre)); n += 1; } catch { /* sigue con las demás */ }
+    }
+    return n;
+  }
+  podar();
+
   const cabeceras = (extra = {}, quien = origen) => ({
     'Access-Control-Allow-Origin': quien,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -288,7 +343,7 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
 
     const texto = encargo(p);
     const huella = createHash('sha256').update(JSON.stringify([proveedor.id, VERSION_ESTILO, p.tipo, p.clave, p.linaje ?? '', p.rol ?? '', p.descripcion.trim(), p.variante ?? 0])).digest('hex');
-    const archivo = cache ? join(cache, `${huella}.img`) : null;
+    const archivo = cache ? join(cache, `${prefijoDe(p.clave)}${huella}.img`) : null;
 
     // Lo ya generado se devuelve sin gastar cupo.
     if (archivo && existsSync(archivo)) {
@@ -321,7 +376,7 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
       if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw Object.assign(new Error('El proveedor no devolvió imagen.'), { codigo: 'proveedor' });
       if (bytes.length > L.maxImagen) throw Object.assign(new Error('Imagen demasiado grande.'), { codigo: 'proveedor' });
       if (!/^image\/(?:png|jpeg|webp)$/.test(tipo)) throw Object.assign(new Error('El proveedor no devolvió una imagen.'), { codigo: 'proveedor' });
-      if (archivo) { await mkdir(cache, { recursive: true }); await writeFile(archivo, bytes); }
+      if (archivo) { await mkdir(cache, { recursive: true }); await writeFile(archivo, bytes); await podar(); }
       trazar({ ruta: 'candidata', tipo: p.tipo, proveedor: proveedor.id, bytes: bytes.length });
       if (res.writableEnded || res.destroyed) return;
       res.writeHead(200, cabeceras({ 'Content-Type': tipo, 'X-Arcanveil-Proveedor': proveedor.id }, res.origenPermitido));
@@ -350,7 +405,23 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
     if (req.method === 'OPTIONS') { res.writeHead(204, cabeceras({}, o)); return res.end(); }
     if (req.method === 'GET' && ruta === '/estado') {
       const salud = await proveedor.salud?.().catch(() => ({ disponible: false, motivo: 'sin respuesta' })) ?? { disponible: true };
-      return json(res, 200, { servicio: SERVICIO_IMAGEN, proveedor: proveedor.id, estilo: VERSION_ESTILO, ...salud, usoHoy: dia.n, limites: { porDia: L.porDia, porMinuto: L.porMinuto } });
+      return json(res, 200, {
+        servicio: SERVICIO_IMAGEN, proveedor: proveedor.id, estilo: VERSION_ESTILO, ...salud, usoHoy: dia.n,
+        limites: { porDia: L.porDia, porMinuto: L.porMinuto },
+        // Qué pasa con lo que se pide: la app lo dice ANTES de pintar.
+        envia: LOCALES.has(proveedor.id) ? 'local' : 'nube',
+        cache: { horas: L.cacheHoras, maximo: L.cacheMax },
+      });
+    }
+    if (req.method === 'POST' && ruta === '/v1/olvidar') {
+      if (!/^application\/json\b/.test(String(req.headers['content-type'] ?? ''))) return fallo(res, 415, 'tipo', 'Se espera JSON.');
+      let p;
+      try { p = await leer(req); } catch (e) { return fallo(res, e.estado ?? 400, e.codigo ?? 'peticion', e.message); }
+      const todas = p?.todas === true;
+      if (!todas && !(typeof p?.clave === 'string' && /^[\w:.-]{1,80}$/u.test(p.clave))) return fallo(res, 400, 'peticion', 'Falta la clave, o «todas».');
+      const borradas = await olvidar({ clave: p.clave, todas });
+      trazar({ ruta: 'olvidar', todas, borradas });
+      return json(res, 200, { servicio: SERVICIO_IMAGEN, borradas });
     }
     if (req.method === 'POST' && ruta === '/v1/candidata') {
       if (!/^application\/json\b/.test(String(req.headers['content-type'] ?? ''))) return fallo(res, 415, 'tipo', 'Se espera JSON.');
@@ -378,7 +449,17 @@ export function crearProxyImagen({ origen, proveedor, puerto = PUERTO_IMAGEN, ca
    LÍNEA DE ÓRDENES
    ═══════════════════════════════════════════════════════════════════════════ */
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href && process.argv.includes('--limpiar')) {
+  // Vaciar la caché de candidatas desde este PC, sin levantar nada en red.
+  const carpeta = carpetaImagenes();
+  let n = 0;
+  for (const nombre of await readdir(carpeta).catch(() => [])) {
+    if (!nombre.endsWith('.img')) continue;
+    try { await unlink(join(carpeta, nombre)); n += 1; } catch (e) { console.error(`No se pudo borrar ${nombre}: ${e.code}`); }
+  }
+  console.log(`Candidatas borradas: ${n} (${carpeta}).`);
+  console.log('Las imágenes elegidas viven en el navegador y se borran con «Borrar partidas y personajes».');
+} else if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const puerto = Number(process.env.ARCANVEIL_IMAGE_PORT) || PUERTO_IMAGEN;
   const origen = process.env.ARCANVEIL_ORIGIN || 'http://localhost:8080';
   const configRuta = join(process.cwd(), '.arcanveil-image-config.json');
