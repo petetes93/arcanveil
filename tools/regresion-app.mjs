@@ -358,11 +358,20 @@ try {
     if (result.disabled || result.failures) throw new Error(`turno fallido: ${a}`);
   }
 
-  // Cada turno del máster termina devolviendo la palabra.
-  const sinPregunta = await evaluate(`ARCANVEIL.ver('narrative.entradas', [])
-    .filter(e => e.voz === 'dm' && (e.texto ?? '').trim())
-    .map(e => e.texto.trim().split('\\n').at(-1))
-    .filter(ultima => !/\\?[»"]?$/.test(ultima))`);
+  // Cada turno del máster termina devolviendo la palabra. Por TURNO, no por
+  // entrada: si llega un aviso del mundo en el mismo turno, la pregunta pasa
+  // a su propia entrada detrás del aviso (`_reducirAnadirEntrada`), y la
+  // narración de antes queda sin ella. Comprobarlo por entrada fallaba solo
+  // en las partidas con aviso («Decides el siguiente paso.», según semilla).
+  // Una pregunta dentro de lo que dice alguien también devuelve la palabra
+  // (`terminaEnPregunta`).
+  const sinPregunta = await evaluate(`(() => {
+    const ultimas = new Map();
+    for (const e of ARCANVEIL.ver('narrative.entradas', [])) {
+      if (e.voz === 'dm' && (e.texto ?? '').trim()) ultimas.set(e.turno ?? e.id, e.texto.trim().split('\\n').at(-1));
+    }
+    return [...ultimas.values()].filter(u => !/\\?[»"]?$/.test(u) && !/«[^»]*\\?[^»]*»/.test(u));
+  })()`);
   if (sinPregunta.length) throw new Error(`turnos que no terminan en pregunta: ${sinPregunta.slice(0, 3).join(' | ')}`);
 
   // Ninguna frase de las que abrían desde el pasado del personaje: ni en la
