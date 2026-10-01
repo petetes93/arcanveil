@@ -34,7 +34,7 @@ import { join } from 'node:path';
 import { crearMotor } from './motor-sin-ventana.mjs';
 import { obtenerEncuentro } from '../src/world/EncounterTables.js';
 import { modeloAdversario, conectar, MARCAS } from './narrador-simulado.mjs';
-import { atiende, pideRespuesta } from './atencion.mjs';
+import { atiende, pideRespuesta, soloEco } from './atencion.mjs';
 
 const simulada = process.argv.includes('--ia-simulada');
 const conGroq = process.argv.includes('--groq');
@@ -256,8 +256,13 @@ function medir(partida) {
   const laxas = partida.turnos.filter((t) => t.preguntaLaxa);
   const contestadasLaxo = laxas.filter((t) => contesta(t, partida.comodin));
   const palabras = partida.turnos.filter((t) => t.texto && !t.combate).map((t) => t.texto.split(/\s+/).length);
+  // Turnos que solo repiten la acción y devuelven la palabra (ver `soloEco`).
+  // Medida nueva y aparte: `genericos` sigue contando lo mismo que antes.
+  const ecos = partida.turnos.filter((t) => t.entrada && !t.combate && soloEco(t));
 
   return {
+    soloEco: ecos.length,
+    ecos: ecos.map((t) => t.entrada),
     frases: total,
     repeticiones,
     tasaRepeticion: total ? repeticiones / total : 0,
@@ -336,6 +341,7 @@ const resumen = {
   tasaRepeticion: suma('repeticiones') / Math.max(1, suma('frases')),
   coletillas: suma('coletillas'),
   genericos: suma('genericos'),
+  soloEco: suma('soloEco'),
   preguntas: suma('preguntas'),
   contestadas: suma('contestadas'),
   informadas: suma('informadas'),
@@ -345,12 +351,13 @@ const resumen = {
   palabrasDesviacion: media(partidas.map((x) => x.metrica.palabrasDesviacion)),
 };
 
-console.log('partida                      frases  repet  colet  genér  preg  contest  palabras±');
+console.log('partida                      frases  repet  colet  genér   eco  preg  contest  palabras±');
 for (const { partida, metrica } of partidas) {
-  console.log(`${`${partida.personaje} · ${partida.estilo}`.padEnd(28)} ${String(metrica.frases).padStart(6)} ${String(metrica.repeticiones).padStart(6)} ${String(metrica.coletillas).padStart(6)} ${String(metrica.genericos).padStart(6)} ${String(metrica.preguntas).padStart(5)} ${String(metrica.contestadas).padStart(8)}  ${metrica.palabrasMedia.toFixed(0)}±${metrica.palabrasDesviacion.toFixed(0)}`);
+  console.log(`${`${partida.personaje} · ${partida.estilo}`.padEnd(28)} ${String(metrica.frases).padStart(6)} ${String(metrica.repeticiones).padStart(6)} ${String(metrica.coletillas).padStart(6)} ${String(metrica.genericos).padStart(6)} ${String(metrica.soloEco).padStart(5)} ${String(metrica.preguntas).padStart(5)} ${String(metrica.contestadas).padStart(8)}  ${metrica.palabrasMedia.toFixed(0)}±${metrica.palabrasDesviacion.toFixed(0)}`);
 }
-console.log(`\nTOTAL: ${resumen.turnos} turnos · ${(resumen.tasaRepeticion * 100).toFixed(1)} % de frases repetidas · ${suma('casiRepetidas')} casi repetidas · ${resumen.coletillas} coletillas · ${resumen.genericos} resultados genéricos · ${resumen.contestadas}/${resumen.preguntas} preguntas atendidas (tema y destinatario), ${resumen.informadas}/${resumen.preguntas} con dato o a quién preguntar (con el criterio laxo anterior: ${resumen.contestadasLaxo}/${resumen.preguntasLaxo})`);
+console.log(`\nTOTAL: ${resumen.turnos} turnos · ${(resumen.tasaRepeticion * 100).toFixed(1)} % de frases repetidas · ${suma('casiRepetidas')} casi repetidas · ${resumen.coletillas} coletillas · ${resumen.genericos} resultados genéricos · ${resumen.soloEco} turnos solo eco + pregunta · ${resumen.contestadas}/${resumen.preguntas} preguntas atendidas (tema y destinatario), ${resumen.informadas}/${resumen.preguntas} con dato o a quién preguntar (con el criterio laxo anterior: ${resumen.contestadasLaxo}/${resumen.preguntasLaxo})`);
 for (const { partida, metrica } of partidas) for (const x of metrica.noAtendidas) console.log(`  ❌ ${partida.personaje}: «${x.entrada}» — ${x.motivo}`);
+for (const { partida, metrica } of partidas) for (const e of metrica.ecos) console.log(`  ∅ ${partida.personaje}: «${e}» — solo eco y pregunta`);
 console.log('\nLo que más se repite:');
 const todas = new Map();
 for (const { metrica } of partidas) for (const [f, n] of metrica.repetidas) todas.set(f, (todas.get(f) ?? 0) + n);
