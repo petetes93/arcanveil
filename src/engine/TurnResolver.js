@@ -1615,6 +1615,7 @@ export class TurnResolver extends SystemBase {
   _cerrarTurno(texto, propuesta, interlocutor = null) {
     const pregunta = String(propuesta ?? '').trim() || this._preguntar(interlocutor);
     this._ultimaPregunta = pregunta;
+    this._preguntasRecientes = [...(this._preguntasRecientes ?? []), pregunta].slice(-8);
     return cerrarConPregunta(texto, pregunta);
   }
 
@@ -1639,11 +1640,21 @@ export class TurnResolver extends SystemBase {
     const flujo = this.rng?.flujo?.('narrativa');
     // Lo que está pasando, si el jugador no lo ha dejado de lado a propósito.
     const sit = enemigos.length ? null : this.sistema('situations')?.paraContexto?.();
-    const tema = sit && !sit.ignoradaAProposito ? sit.tema : null;
-    return preguntaDeMesa(
-      { npcs, enemigos, franja: this.leer('world.tiempo.franja'), tema },
-      { anterior: this._ultimaPregunta, elegir: (lista) => flujo?.elegir(lista) ?? lista[0] },
+    // Y no si se recordó hace menos de cuatro turnos: una vez sirve de
+    // recordatorio; cada dos, de muletilla.
+    const turno = this.leer('meta.turno', 0);
+    const reciente = turno - (this._temaTurno ?? -99) < 4;
+    const tema = sit && !sit.ignoradaAProposito && !reciente ? sit.tema : null;
+    const pregunta = preguntaDeMesa(
+      { npcs, enemigos, franja: this.leer('world.tiempo.franja'), tema, temaVez: this._temaVeces ?? 0 },
+      { anterior: this._ultimaPregunta, recientes: this._preguntasRecientes ?? [], elegir: (lista) => flujo?.elegir(lista) ?? lista[0] },
     );
+    const nucleo = String(tema ?? '').toLowerCase().replace(/^(?:el|la|los|las|lo)\s+/, '');
+    if (tema && pregunta.toLowerCase().includes(nucleo)) {
+      this._temaTurno = turno;
+      this._temaVeces = (this._temaVeces ?? 0) + 1;
+    }
+    return pregunta;
   }
 
   /**

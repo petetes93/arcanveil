@@ -37,10 +37,13 @@ function conLoDe(tema) {
  * @param {Array<{nombre: string}>} [escena.enemigos] En combate.
  * @param {string} [escena.franja] 'noche', 'ocaso', 'alba'…
  * @param {string} [escena.tema] De qué va lo que está pasando («la figura
- *   del tejado»), si el jugador no lo ha dejado de lado.
+ *   del tejado»), si el jugador no lo ha dejado de lado y no se le ha
+ *   recordado hace poco (eso lo decide quien llama).
+ * @param {number} [escena.temaVez] Cuántas veces se ha recordado ya: elige
+ *   la forma, para que no sea siempre la misma frase.
  * @returns {string[]}
  */
-export function candidatas({ npcs = [], enemigos = [], franja = null, tema = null } = {}) {
+export function candidatas({ npcs = [], enemigos = [], franja = null, tema = null, temaVez = 0 } = {}) {
   // Las variantes delante y la corta al final: tras una corta se puede
   // nombrar a quien espera; tras una variante, siempre la corta (ver
   // `preguntaDeMesa`).
@@ -64,8 +67,15 @@ export function candidatas({ npcs = [], enemigos = [], franja = null, tema = nul
   // Si hay algo pasando en la escena y el jugador no lo ha dejado de lado,
   // la pregunta apunta a ello: «¿Qué haces con lo de la figura del tejado?».
   // Sale de la situación, no se inventa: es su `tema`. «¿Qué haces?» cerraba
-  // tres de cada cuatro turnos.
-  if (tema) lista.push(`¿Qué haces con ${conLoDe(tema)}?`);
+  // tres de cada cuatro turnos. Pero el mismo recordatorio cada dos turnos
+  // es otra muletilla («¿Qué haces con lo de la figura del tejado?» salió
+  // 10 veces en seis partidas): quien llama lo espacia, y aquí se varía la
+  // forma, siempre con el mismo tema y sin añadir nada que no haya.
+  if (tema) {
+    const lo = conLoDe(tema);
+    const formas = [`¿Qué haces con ${lo}?`, `¿Y ${lo}?`, `${lo.charAt(0).toUpperCase()}${lo.slice(1)} sigue ahí. ¿Qué haces?`];
+    lista.push(formas[temaVez % formas.length]);
+  }
 
   // Las franjas son las del reloj del juego: «ocaso» y «alba», no «anochecer».
   if (franja === 'ocaso' || franja === 'noche') lista.push('La noche se echa encima. ¿Qué haces?');
@@ -80,17 +90,21 @@ export function candidatas({ npcs = [], enemigos = [], franja = null, tema = nul
  * @param {Object} escena Ver `candidatas`.
  * @param {Object} [opciones]
  * @param {string|null} [opciones.anterior]
+ * @param {string[]} [opciones.recientes] Los últimos cierres: una variante
+ *   que esté ahí no vuelve todavía.
  * @param {(lista: string[]) => string} [opciones.elegir]
  * @returns {string}
  */
-export function preguntaDeMesa(escena = {}, { anterior = null, elegir = (l) => l[0] } = {}) {
+export function preguntaDeMesa(escena = {}, { anterior = null, recientes = [], elegir = (l) => l[0] } = {}) {
   // Después de una variante, la corta: «Vervek espera tu respuesta» dos
   // turnos seguidos ya es una muletilla.
   if (anterior && anterior !== CORTA) return CORTA;
   const lista = candidatas(escena);
   // Después de la corta, una variante si la hay: si no, «¿Qué haces?» salía
-  // turno tras turno (el azar volvía a elegirla).
-  const variantes = lista.filter((p) => p !== CORTA);
+  // turno tras turno (el azar volvía a elegirla). Pero no la misma de hace
+  // dos turnos: alternar «Vervek espera tu respuesta» con «¿Qué haces?»
+  // también es una muletilla (5 veces en una partida medida).
+  const variantes = lista.filter((p) => p !== CORTA && !recientes.includes(p));
   if (anterior === CORTA && variantes.length) return elegir(variantes) ?? variantes[0];
   return elegir(lista) ?? CORTA;
 }
