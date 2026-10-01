@@ -787,8 +787,24 @@ export class ActionRouter extends SystemBase {
       };
     }
 
+    // Salir DE algo no es ir a ese algo. «Salgo de la posada» estando en la
+    // calle se narraba describiendo la posada por dentro; «salgo del pueblo»
+    // es dejar el pueblo, sin decir adónde.
+    const llano = sinAcentos(String(intencion.texto ?? '').toLowerCase());
+    const saleDe = llano.match(/\b(?:salgo|me salgo|salir|me voy)\s+(?:de |del )(?:la |el |los |las )?([a-zñ]+)/)?.[1] ?? null;
+    const SITIOS_DE_DENTRO = /^(?:posada|taberna|meson|fragua|herreria|templo|santuario|capilla|tienda|casa|local)$/;
+    if (saleDe && SITIOS_DE_DENTRO.test(saleDe) && !this.leer('world.sublugar')) {
+      const aqui = obtenerLugar(this.leer('world.ubicacion'))?.nombre;
+      return this._rechazar(`No estás dentro de ${articulo(saleDe, /^(?:posada|taberna|fragua|herreria|capilla|tienda|casa)$/.test(saleDe) ? 'f' : 'm')} ${saleDe}: estás en la calle${aqui ? `, en ${aqui}` : ''}.`);
+    }
+    // Solo si el destino que vio el analizador es el propio pueblo: «me voy
+    // del pueblo por el camino del norte» sí dice adónde.
+    const PUEBLO = /^(?:(?:el|la) )?(?:pueblo|aldea|villa|ciudad|lugar|sitio)$/;
+    const dejaElPueblo = Boolean(saleDe && PUEBLO.test(saleDe) && PUEBLO.test(sinAcentos(String(intencion.objetivo ?? 'pueblo').toLowerCase())));
+
     // ─── Sin destino: se ofrecen los disponibles ────────────────────────
-    if (!intencion.objetivo) {
+    // No es un viaje: no cambia `world.ubicacion` hasta que diga adónde.
+    if (!intencion.objetivo || dejaElPueblo) {
       const destinos = world?.destinos() ?? [];
 
       if (!destinos.length) {
@@ -800,7 +816,7 @@ export class ActionRouter extends SystemBase {
         motivo: null,
         narracion: null,
         pistaDirector: `El personaje quiere irse pero no ha dicho adónde. Desde aquí puede ir a: ${destinos.map((d) => d.nombre).join(', ')}. Pregúntale.`,
-        resultado: null,
+        resultado: { tipo: 'salida_sin_destino', destinos: destinos.map((d) => ({ nombre: d.nombre, horas: d.distancia })) },
       };
     }
 

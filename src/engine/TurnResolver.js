@@ -802,6 +802,9 @@ export class TurnResolver extends SystemBase {
       } else if (situacion?.omitida) {
         pistas.push('El jugador ha decidido no meterse en lo que está pasando aquí. Respétalo: no le lleves de vuelta a ello ni le castigues por ignorarlo.');
       }
+      // Salir sin destino: el director de respaldo dice por dónde se sale (el
+      // modelo lo lee en la pista).
+      if (ruta?.resultado?.tipo === 'salida_sin_destino') peticion.contexto.salidaSinDestino = ruta.resultado;
       if (pistas.length) {
         peticion.contexto.pistaRuta = pistas.join(' ');
         peticion.ambicion = ambicion.grado;

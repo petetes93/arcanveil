@@ -530,8 +530,19 @@ export class ProceduralProvider extends IDMProvider {
     // Si ha intervenido en algo que estaba pasando, lo que ocurre es eso: la
     // rueda que se calza, la niña que se aparta del pozo. Una frase genérica
     // de tirada («Todo encaja a la primera») no dice nada al lado.
-    const mirada = !ctx.situacionResultado && peticion.accion ? this._observar(peticion, ctx) : null;
-    if (ctx.situacionResultado) {
+    const mirada = !ctx.situacionResultado && !ctx.salidaSinDestino && peticion.accion ? this._observar(peticion, ctx) : null;
+    // Salir sin decir adónde: se queda en el sitio (no es un viaje) y se
+    // dice por dónde se sale, con lo que el mapa sabe. Salía «Sales del
+    // pueblo» y debajo las calles del pueblo, como si no se hubiera movido.
+    const salida = ctx.salidaSinDestino;
+    if (salida) {
+      const lugar = obtenerLugar(ctx.mundo?.ubicacion)?.nombre ?? 'el pueblo';
+      const caminos = (salida.destinos ?? []).map((d) => `${d.nombre.replace(/^(El|La|Los|Las)\s/, (a) => a.toLowerCase())} (${horasDichas(d.horas)})`);
+      const lista = caminos.length > 1 ? `${caminos.slice(0, -1).join(', ')} y ${caminos.at(-1)}` : caminos[0];
+      parrafos.push(lista
+        ? `Llegas a las afueras de ${lugar}. De aquí salen caminos hacia ${lista}. ¿Hacia dónde?`
+        : `Llegas a las afueras de ${lugar}.`);
+    } else if (ctx.situacionResultado) {
       parrafos.push(ctx.situacionResultado);
     } else if (mirada) {
       // Mirar no se narra con «Ves lo principal; los detalles, no tanto»: se
@@ -552,7 +563,7 @@ export class ProceduralProvider extends IDMProvider {
     // Lo que la acción nombra y está aquí se ve: «corro hacia el puente»,
     // «bebo agua del río». Una vez, no cada turno. Tras un imposible, no: el
     // tejado que no alcanzó no se describe como si estuviera allí.
-    const nombrado = !mirada && !ctx.situacionResultado && peticion.ambicion !== 'desmedida' ? this._rasgoNombrado(peticion, ctx) : null;
+    const nombrado = !mirada && !salida && !ctx.situacionResultado && peticion.ambicion !== 'desmedida' ? this._rasgoNombrado(peticion, ctx) : null;
     if (nombrado) parrafos.push(nombrado);
 
     // ─── 2. Atmósfera ──────────────────────────────────────────────────
@@ -565,7 +576,7 @@ export class ProceduralProvider extends IDMProvider {
     // siempre no es lo que más dice, es lo que cabe.
     // Si hay algo pasando en escena, eso es la escena: sin paisaje encima.
     const conEscena = (ctx.contextoEscena ?? []).length > 0;
-    if (!conEscena && !mirada && !nombrado && this._tocaDescribirEntorno(ctx)) {
+    if (!conEscena && !mirada && !nombrado && !salida && this._tocaDescribirEntorno(ctx)) {
       parrafos.push(this._componerAtmosfera(ctx, { frases: 1 }));
     }
 
