@@ -20,6 +20,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 let fallos = 0;
 let casos = 0;
@@ -105,6 +106,14 @@ const texto = async (r) => (r && !r.error && typeof r.text === 'function' ? r.te
   sw.fijarRed(async () => new Response('no', { status: 404 }));
   await sw.pedir(`${ORIGEN}/src/falta.js`);
   comprobar(!sw.guardado.has(`${ORIGEN}/src/falta.js`), 'un 404 no se guarda');
+}
+
+{
+  // La lista de lo que se guarda para jugar sin conexión, al día: un módulo
+  // nuevo que no esté en ella rompe el juego sin red, y todo lo demás de
+  // esta auditoría sale verde igual.
+  const r = spawnSync(process.execPath, ['tools/generar-sw.mjs', '--revisar'], { encoding: 'utf8' });
+  comprobar(r.status === 0, 'sw.js lista todos los archivos del juego (generar-sw --revisar)', (r.stdout + r.stderr).trim());
 }
 
 console.log(`\n${casos - fallos}/${casos} comprobaciones`);
