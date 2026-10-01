@@ -1,6 +1,6 @@
 # Arreglo integral del playtest: informe
 
-Rama `feat/arreglo-playtest`, sacada de `feat/narrador-ia` (18b0cfa). `main` (8c02138) sin tocar. Subida a GitHub el 29-sep-2026 hasta 2a8e2e9; todo lo posterior (la revisión del 29-sep y la del tester del 1-oct, de 19384a0 a 7cfdcce) está **en local, sin subir**. No se ha llamado a Groq, Gemini, Cloudflare ni a ningún servicio real: las pruebas usan dobles en 127.0.0.1.
+Rama `feat/arreglo-playtest`, sacada de `feat/narrador-ia` (18b0cfa). `main` (8c02138) sin tocar. Subida a GitHub el 29-sep-2026 hasta 2a8e2e9, y el 1-oct-2026 hasta 1987159 (la revisión del 29-sep y la del tester del 1-oct). Sin fusionar. No se ha llamado a Groq, Gemini, Cloudflare ni a ningún servicio real: las pruebas usan dobles en 127.0.0.1.
 
 **Esto no está «todo solucionado».** Quedan por validar con el mundo real: activar Groq (cuenta, plan y permiso tuyos), generar imágenes con ComfyUI en tu equipo, revisar el estilo con tu imagen de referencia (no ha llegado) y medir la portada en un móvil de verdad. Ver [Pendiente](#pendiente-y-decisiones-tuyas).
 
@@ -134,7 +134,7 @@ Sigue sin dependencias. Se miró y no hizo falta: `idb-keyval` (IndexedDB son 80
 6. Pintar **enemigos** fuera del combate: la galería y el puente ya lo admiten; falta decidir dónde en la interfaz (¿un bestiario?).
 7. **Portada en un móvil de verdad**: sin ventana no se ve el tirón; `medir-portada` da los números de Chrome.
 8. Dos animaciones pequeñas siguen con `blur` (veredicto del dado y el rótulo de momento).
-9. **Push**: todo desde 19384a0 hasta 7cfdcce está en local. Son las dos revisiones, 15 commits más este informe. Se suben cuando digas.
+9. **Fusión**: la rama está subida (1-oct) y sin fusionar; `main` sigue en 8c02138. Se fusiona cuando digas.
 11. **Atacar a alguien de la escena del peaje**: «desenvaino el cuchillo y ataco a Korsa» (Korsa, vendedor ambulante) abre combate contra un «Guardia corrupto», no contra Korsa. «ataco a Korsa» a secas no abre combate. Visto el 1-oct, sin arreglar. Hay que decidir qué debe pasar: ¿saltan los guardias, o se pelea con Korsa?
 12. **Turnos que solo repiten la acción**: 3 de 132 en la medida automática. El tester vio más leyendo seis partidas a mano. Arreglarlo en general es diseño del procedural: qué consecuencia tiene trepar, esperar o rodear cuando no hay plantilla. Queda medido, no resuelto.
 13. **Repetición del cierre**: 5,2 % frente al 4,2 % de 2a8e2e9. ¿Qué prefieres: menos «X espera tu respuesta» o menos «¿Qué haces?» a secas?
