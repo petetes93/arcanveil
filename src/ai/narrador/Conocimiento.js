@@ -158,6 +158,12 @@ export function resolverTema(texto, { lugar, conocidos = [], interlocutor = null
   // «¿Quién es el más rico del pueblo?» pregunta por alguien, no por el
   // pueblo: sin esto se contestaba describiendo las calles.
   if (/\bquien (?:es|era|tiene)\b/.test(n) && dicho) return { tipo: 'otro', nombre: dicho };
+  // «Si alguien ha visto mercenarios por el camino»: se pregunta por los
+  // mercenarios; el camino es dónde. Contestaba cómo ir al Camino del Norte
+  // porque «camino» era la palabra tras «por». Cuando la pregunta nombra lo
+  // visto o lo que hay, un lugar solo es el tema si sale en eso nombrado.
+  const nucleo = visto ? llano(visto).split(/[^a-zñ]+/u).filter((p) => p.length > 2 && !VACIAS.has(p)) : null;
+  const enNucleo = (p) => !nucleo || nucleo.some((q) => q === p || (q.length > 4 && p.startsWith(q.slice(0, -1))));
   let mejor = null;
   for (const l of Object.values(LUGARES)) {
     if (!l?.refId || !l.nombre) continue;
@@ -166,6 +172,7 @@ export function resolverTema(texto, { lugar, conocidos = [], interlocutor = null
     // Tiene que casar lo principal de la pregunta, o dos palabras del nombre:
     // «el incendio de la forja» no es Forja Alta por compartir «forja».
     if (!comunes.length || (!comunes.includes(tema) && comunes.length < 2)) continue;
+    if (!comunes.some(enNucleo)) continue;
     const puntos = comunes.length * 2 + (comunes.includes(tema) ? 3 : 0) + (l.refId === lugar ? -1 : 0);
     const cerca = Mapa.ruta(lugar, l.refId)?.ruta?.length ?? 99;
     if (!mejor || puntos > mejor.puntos || (puntos === mejor.puntos && cerca < mejor.cerca)) mejor = { puntos, cerca, lugar: l };
@@ -176,7 +183,7 @@ export function resolverTema(texto, { lugar, conocidos = [], interlocutor = null
   // Lo mismo con lo que hay aquí: preguntar por «el incendio de la forja» no
   // es preguntar por la fragua.
   const rasgo = buscarRasgo(texto, lugar, obtenerLugar(lugar)?.terreno);
-  if (rasgo && rasgo.palabras.split('|').some((w) => w === tema || w.split(' ').includes(tema))) return { tipo: 'rasgo', ref: rasgo.clave, rasgo };
+  if (rasgo && enNucleo(tema) && rasgo.palabras.split('|').some((w) => w === tema || w.split(' ').includes(tema))) return { tipo: 'rasgo', ref: rasgo.clave, rasgo };
 
   return { tipo: 'otro', nombre: dicho ?? '' };
 }
