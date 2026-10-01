@@ -1,24 +1,26 @@
 # Arreglo integral del playtest: informe
 
-Rama `feat/arreglo-playtest`, sacada de `feat/narrador-ia` (18b0cfa). `main` (8c02138) sin tocar. Subida a GitHub el 29-sep-2026 hasta 2a8e2e9; los cinco commits de la revisión posterior (19384a0 … 9579120) están **en local, sin subir**. No se ha llamado a Groq, Gemini, Cloudflare ni a ningún servicio real: las pruebas usan dobles en 127.0.0.1.
+Rama `feat/arreglo-playtest`, sacada de `feat/narrador-ia` (18b0cfa). `main` (8c02138) sin tocar. Subida a GitHub el 29-sep-2026 hasta 2a8e2e9; todo lo posterior (la revisión del 29-sep y la del tester del 1-oct, de 19384a0 a 7cfdcce) está **en local, sin subir**. No se ha llamado a Groq, Gemini, Cloudflare ni a ningún servicio real: las pruebas usan dobles en 127.0.0.1.
 
 **Esto no está «todo solucionado».** Quedan por validar con el mundo real: activar Groq (cuenta, plan y permiso tuyos), generar imágenes con ComfyUI en tu equipo, revisar el estilo con tu imagen de referencia (no ha llegado) y medir la portada en un móvil de verdad. Ver [Pendiente](#pendiente-y-decisiones-tuyas).
 
 ## Cómo comprobarlo
 
 ```bash
-node tools/auditar-todo.mjs                         # 28 auditorías, sin red, por código de salida
+node tools/auditar-todo.mjs                         # 29 auditorías, sin red, por código de salida
 node tools/regresion-app.mjs --capturas             # Chrome móvil (390×844)
 node tools/regresion-app.mjs --capturas --desktop   # Chrome escritorio (1440×900)
 node tools/regresion-app.mjs --sin-ia               # sin generador de imágenes
 node tools/medir-portada.mjs                        # coste de la portada quieta
 node tools/buscar-secretos.mjs                      # claves en árbol e historia
 node tools/auditar-playtest.mjs --salida carpeta    # y lee las dos partidas
+node tools/auditar-tester.mjs --salida carpeta      # lo del tester del 1-oct, con transcripción
+node tools/medir-narrador.mjs                       # repetición, atención y turnos solo de eco
 ```
 
 **Corrección.** Este informe decía «28/28 auditorías en verde» para 2a8e2e9, y no era cierto: `auditar-servidores.mjs` se caía con código 1 (ENOENT, leía `src/art/retrato-local.js`, borrado en la rama). El bucle con que se comprobó miraba las últimas líneas de salida, no el código de salida. Desde 19384a0, `tools/auditar-todo.mjs` las cuenta por código.
 
-Estado en 9579120, 29-sep-2026 (Node 24.17.0, Windows 11, Chrome sin ventana):
+Estado en **7cfdcce, 1-oct-2026** (Node 24.17.0, Windows 11, Chrome sin ventana):
 
 | Auditoría | Código | Duración |
 |---|---|---|
@@ -31,27 +33,36 @@ Estado en 9579120, 29-sep-2026 (Node 24.17.0, Windows 11, Chrome sin ventana):
 | auditar-combate | 0 | 0,1 s |
 | auditar-config | 0 | 0,1 s |
 | auditar-creacion | 0 | 0,1 s |
-| auditar-cronica | 0 | 0,1 s |
-| auditar-economia | 0 | 0,7 s |
+| auditar-cronica | 0 | 0 s |
+| auditar-economia | 0 | 0,8 s |
 | auditar-encargos | 0 | 0 s |
 | auditar-groq-diagnostico | 0 | 0,3 s |
 | auditar-guardados | 0 | 1 s |
-| auditar-historia | 0 | 22,7 s |
+| auditar-historia | 0 | 22,9 s |
 | auditar-imports | 0 | 0,1 s |
-| auditar-interpretacion | 0 | 10,8 s |
+| auditar-interpretacion | 0 | 10,2 s |
 | auditar-mision | 0 | 0,1 s |
 | auditar-narrador-ia | 0 | 4,4 s |
-| auditar-narrador | 0 | 13,8 s |
+| auditar-narrador | 0 | 13,7 s |
 | auditar-persona | 0 | 0,1 s |
-| auditar-playtest | 0 | 27,7 s |
+| auditar-playtest | 0 | 28,3 s |
 | auditar-puente-uso | 0 | 1 s |
 | auditar-retrato | 0 | 0,6 s |
-| auditar-servidores | 0 | 4,4 s |
+| auditar-servidores | 0 | 4,3 s |
 | auditar-sujeto | 0 | 0 s |
 | auditar-sw | 0 | 0,1 s |
+| auditar-tester | 0 | 10,2 s |
 | auditar-xss | 0 | 0,1 s |
 
-28/28 terminadas con código 0. Regresión en Chrome: móvil y escritorio con estudio completo (pintar, otra, usar, cerrar sin elegir, nube con permiso) y borrado de datos con recarga; `--sin-ia` con marcador. Las tres con 20 turnos, 0 fallos, 0 excepciones y 0 peticiones fuera del equipo. `generar-sw.mjs --revisar`: al día. `buscar-secretos.mjs`: ninguna clave en el árbol ni en los 262 commits de todas las ramas (este checkout sí tiene historia). La imagen de las regresiones es un PNG verde de 1×1 del doble: no dice nada de la calidad de FLUX ni de ComfyUI. Capturas en `dist/regresion/`.
+**29/29 terminadas con código 0** (`auditar-todo.mjs`, código de salida 0). Hay una auditoría más que el 29-sep: `auditar-tester` (71 comprobaciones; 35/71 con el código anterior).
+
+**Chrome**, seis ejecuciones seguidas en 7cfdcce: móvil ×2, escritorio ×1 y `--sin-ia` ×3. Las seis con código 0, 20 turnos y 0 peticiones fuera del equipo. Las de móvil y escritorio llevan el estudio completo (pintar, otra, usar, cerrar sin elegir, nube con permiso) y el borrado de datos con recarga.
+
+**El timeout que vio el tester** (móvil, recarga sin conexión, primera ejecución) **no se ha reproducido**: hoy ha habido 3 ejecuciones en móvil y ninguna se quedó colgada. No se puede descartar ni afirmar nada más. Si vuelve, hay que mirar el registro de carga, quién controla el SW, la caché y los eventos CDP antes de culpar al juego.
+
+**Sí se vio otro fallo intermitente.** `--sin-ia` falló 1 vez de 4 en el código de este mismo día con «turnos que no terminan en pregunta: Decides el siguiente paso.». No era un turno sin cierre. Cuando un aviso del mundo cae en el mismo turno, la pregunta pasa a su propia entrada detrás del aviso, y la comprobación miraba entrada por entrada. Se reprodujo sin navegador y la comprobación pasó a ser por turno (294533d). Después de eso, 3 de 3 ejecuciones en verde.
+
+`generar-sw.mjs --revisar`: al día. `buscar-secretos.mjs`: código 0, ninguna clave en el árbol ni en los 272 commits de todas las ramas. Ojo: es lo que encuentra ESTE escáner, no una garantía. La imagen de las regresiones es un PNG verde de 1×1 del doble: no dice nada de la calidad de FLUX ni de ComfyUI. Capturas en `dist/regresion/`.
 
 ## Por commit
 
@@ -82,7 +93,24 @@ Estado en 9579120, 29-sep-2026 (Node 24.17.0, Windows 11, Chrome sin ventana):
 | bc7e6d5 enlaces | Con `assets/linked` → carpeta de fuera, `GET /assets/linked/private.png` daba 200 y los bytes | `stat`/`readFile` siguen enlaces; la lista se comprobaba sobre la cadena | La ruta canónica tiene que ser la pedida bajo la raíz canónica; se lee la canónica; ningún enlace | `auditar-servidores` 73: fuera, codificadas, interno, GET/HEAD normales, `--lan` (con lo anterior fallan 3) | Enlace de archivo no probado en este Windows (EPERM al crearlo); ventana comprobar-leer con acceso de escritura local |
 | 9a614d0 candidatas | El estudio decía «no se guarda ni se envía» y el puente escribía cada candidata en disco antes de aprobar; ComfyUI en `output/` | Caché sin ciclo de vida; texto sin relación con el proveedor | Nota según proveedor; permiso con la nube; caché con dueño, olvido al cerrar, 24 h, tope 40, `--limpiar`; ComfyUI a temporal | `auditar-retrato` y Chrome: archivos e IndexedDB en cada paso, cerrar sin elegir, nube | Sin ComfyUI real: qué deja él fuera de su temporal está sin comprobar |
 | 3c1ab31 borrar datos | Tras «Borrar partidas y personajes» y recargar, los retratos elegidos volvían | IndexedDB y el puente fuera del borrado | Espera a vaciar la galería (transacción confirmada) y pide al puente olvidar todo; dice qué no pudo; `borrarPersonaje` olvida su retrato | Chrome: galería y caché vacías tras recargar; lo ajeno intacto | Si el puente no está en marcha, sus candidatas esperan a caducar o a `--limpiar` (se avisa) |
-| 9579120 repetición | Mismo trío 9 y 10 de 20 turnos; una sugerencia 9 turnos seguidos; «¿Qué haces?» 15 y 16 de 20; «Preguntar a Cordan por Cordan» | Solo contaba como usado lo idéntico; lo ignorado no caducaba; la huella cambiaba con cada pulso | Usado por raíces; ignorado dos turnos descansa tres; huella sin pulsos; variante de cierre con la trama; aviso del mundo antes del cierre | `auditar-playtest` 25: trío 2 y 3/20, racha 3, «¿Qué haces?» 11/20 (con lo anterior fallan 6) | Sin trama ni interlocutor, «¿Qué haces?» sigue siendo el cierre; el procedural no escribe como un modelo |
+| 9579120 repetición | Mismo trío 9 y 10 de 20 turnos; una sugerencia 9 turnos seguidos; «¿Qué haces?» 15 y 16 de 20; «Preguntar a Cordan por Cordan» | Solo contaba como usado lo idéntico; lo ignorado no caducaba; la huella cambiaba con cada pulso | Usado por raíces; ignorado dos turnos descansa tres; huella sin pulsos; variante de cierre con la trama; aviso del mundo antes del cierre | `auditar-playtest` 25: trío 2 y 3/20, racha 3, «¿Qué haces?» 11/20 (con lo anterior fallan 6) | **Subió la repetición de frases de 4,2 % a 7,4 %** (medido el 1-oct; corregido en parte en c42d3ed, ver abajo) |
+
+### Revisión del tester del 1-oct (fallos encontrados en 2a8e2e9)
+
+Los puntos 1 a 5 del tester coinciden con la revisión del 29-sep y ya estaban arreglados en local (19384a0 … 171cf8b). Lo nuevo:
+
+| Commit | Fichero / función | Reproducción exacta | Causa | Contrato elegido | Prueba antes → después | Riesgo restante |
+|---|---|---|---|---|---|---|
+| ce25d5a contar | `engine/Recuento.js` (nuevo), `IntentParser.interpretar`, `Segmentos`, `ActionRouter._recontar`, `TurnResolver._registrarConversacion` | Semilla 9303, Sive rastreadora: «cuento cuánta gente hay y qué hace cada uno» da «Cormir te escucha sin interrumpir… midiéndote». Igual «cuento las monedas que llevo» | «cuento» puntuaba como hablar (`talk`) y el procedural elegía oyente | Contar cosas es mirar, sin tirada ni destinatario. El dato sale del estado: gente a la vista con oficio, oro de la bolsa, inventario por raíz o «no tienes flechas». Sin cifra en el estado, no se inventa. Narrar sigue siendo hablar, con quien se nombra o el último interlocutor | `auditar-tester` 2 semillas, con flechas, tras hablar, tras guardar y cargar: destinatario (`npc:talked`), oro, inventario entero, actitud y texto | «Qué hace cada uno» solo da lo que sabe el motor (oficio y sitio); un recuento con cifra rara («cuento los pasos») dice que no lo tiene |
+| 85f3f52 gestos | `ActionRouter._gesto` y `comprobarGesto`, `TurnResolver` (foco y gesto previo) | Semilla 9303: «afilo el hacha a la vista de todos» sin hacha da «No llevas hacha; afilas el arco corto». Con un vinculado, «…el foco de pacto» | Contrato viejo: sin el objeto, hacer el gesto con el equipado | Si falta, se dice qué falta y se pregunta por lo que sí lleva y admite el gesto, sin hacer nada ni gastar turno. Afilar y envainar piden filo. En una orden compuesta se aclara antes de actuar, y «afilo el cuchillo y ataco a Korsa» ya no pierde el ataque | `auditar-tester`: los nueve casos pedidos, sin `combat:request` accidental. **Contrato de `auditar-coherencia` cambiado**: exigía la sustitución, y sustituir es decidir por el jugador | El ataque contra un civil con arma que no se lleva («ataco a Korsa con el hacha») se narra «con el hacha»: sin tocar |
+| efe43b3 mercenarios | `narrador/Conocimiento.resolverTema` | «le pregunto a Xivio si ha visto mercenarios por el camino» da indicaciones del Camino del Norte (semillas 9303 y 5; Torket no sale en las semillas 1-400, el fallo no depende del nombre) | Lo visto («mercenarios») se reconocía, pero ganaba el lugar por «camino», que va tras «por» | Si se pregunta qué se ha visto o qué hay, un lugar solo es el tema si sale en eso. «De mercenarios no sé nada. Pregunta a los carreteros…» | `auditar-tester`: tres variantes por semilla, sin rumor ajeno, con control («por el camino del norte» sigue dando el camino) | La negativa «De eso no hablo» de Cormir es válida (guarda un secreto) y la rúbrica ya la cuenta como respuesta |
+| 70f2b3f salir | `ActionRouter._viajar`, `ProceduralProvider._turnoNarrativo` | «salgo del pueblo» da «Sales del pueblo» y debajo las calles del centro. «salgo de la posada» estando en la calle describe la posada | No había intención para «salir de»; el procedural ignoraba la pista «pregúntale» | Salir sin destino no cambia `world.ubicacion`: afueras, caminos conocidos con distancia y «¿Hacia dónde?». Con destino sí es viaje. Salir de un sitio en el que no se está se aclara sin gastar turno | `auditar-tester` | El modelo real recibe la misma pista que antes: no probado con Groq |
+| c42d3ed cierres | `Pregunta.preguntaDeMesa`, `TurnResolver._preguntar` | `medir-narrador`: 4,2 % de frases repetidas en 2a8e2e9, **7,4 % tras 9579120**. «¿Qué haces con lo de la figura del tejado?» sale 10 veces | Lo metí yo en 9579120: tras «¿Qué haces?», siempre una variante | La trama se recuerda una vez cada 4 turnos como mucho, en tres formas; una variante no vuelve si está entre los 8 últimos cierres | 7,4 % → **5,2 %**; «¿Qué haces?» a secas 11 y 12 de 20 (≤ 12) | **No vuelve al 4,2 %**: queda «X espera tu respuesta» y dos acotaciones. Bajarlo más sube el «¿Qué haces?» a secas |
+| c1bbb7f rúbrica | `tools/atencion.mjs`, `medir-narrador.mjs` | La rúbrica daba por atendidas las indicaciones del camino a la pregunta por mercenarios, y 0 genéricos | Bastaba con que la respuesta repitiera una palabra de la pregunta; los genéricos solo buscaban frases hechas | Lo preguntado es el núcleo (lo visto, lo que hay). Una negativa con motivo atiende pero no informa. Medida nueva y aparte: turnos solo de eco | Ejemplos reales en `auditar-tester`. Hoy: **3 de 132 turnos solo eco** («Trepas al pretil del puente. ¿Qué haces?»), y los genéricos siguen en 0 | El marcador no se ha tocado para que mejore: lo nuevo **suma** fallos |
+| 27bdfa1 sw | `tools/auditar-sw.mjs` | Con `Recuento.js` sin listar en `sw.js`, `auditar-sw` salía verde | Miraba el comportamiento, no si la lista estaba al día | Ejecuta `generar-sw --revisar` | Falla con el `sw.js` anterior | — |
+| 294533d regresión | `tools/regresion-app.mjs` | `--sin-ia`, 1 de 4: «Decides el siguiente paso.» | Comprobaba por entrada; con un aviso del mundo en el turno, la pregunta va en otra entrada | Por turno, aceptando la pregunta dentro de una cita | Reproducido sin navegador; 3 de 3 después | — |
+
+Medidas en 7cfdcce: `revision-manual`, 37/39 preguntas atendidas y 33/39 con dato (el tester midió 36/39 y 33/39 en 2a8e2e9). `medir-narrador`, 132 turnos: 5,2 % de frases repetidas, 24 casi repetidas, 0 genéricos, 3 solo de eco y 24/25 atendidas. Es el procedural; **no es una evaluación de Groq**.
 
 ## Arquitectura, en corto
 
@@ -106,5 +134,8 @@ Sigue sin dependencias. Se miró y no hizo falta: `idb-keyval` (IndexedDB son 80
 6. Pintar **enemigos** fuera del combate: la galería y el puente ya lo admiten; falta decidir dónde en la interfaz (¿un bestiario?).
 7. **Portada en un móvil de verdad**: sin ventana no se ve el tirón; `medir-portada` da los números de Chrome.
 8. Dos animaciones pequeñas siguen con `blur` (veredicto del dado y el rótulo de momento).
-9. **Push de la revisión**: los cinco commits desde 19384a0 están en local; se suben cuando digas.
+9. **Push**: todo desde 19384a0 hasta 7cfdcce está en local. Son las dos revisiones, 15 commits más este informe. Se suben cuando digas.
+11. **Atacar a alguien de la escena del peaje**: «desenvaino el cuchillo y ataco a Korsa» (Korsa, vendedor ambulante) abre combate contra un «Guardia corrupto», no contra Korsa. «ataco a Korsa» a secas no abre combate. Visto el 1-oct, sin arreglar. Hay que decidir qué debe pasar: ¿saltan los guardias, o se pelea con Korsa?
+12. **Turnos que solo repiten la acción**: 3 de 132 en la medida automática. El tester vio más leyendo seis partidas a mano. Arreglarlo en general es diseño del procedural: qué consecuencia tiene trepar, esperar o rodear cuando no hay plantilla. Queda medido, no resuelto.
+13. **Repetición del cierre**: 5,2 % frente al 4,2 % de 2a8e2e9. ¿Qué prefieres: menos «X espera tu respuesta» o menos «¿Qué haces?» a secas?
 10. **Candidatas del puente**: ahora caducan a las 24 h con un tope de 40. Si prefieres que no se guarden nunca en disco (y «Otra versión» repinte siempre), es un cambio pequeño; es tu decisión.
