@@ -32,9 +32,9 @@ import { obtenerEnemigo } from '../data/enemies.data.js';
 import { DIRECCION } from '../config/balance.config.js';
 import { DOMINIO as DOMINIO_RNG } from '../core/RNG.js';
 import { obtenerPlantilla } from '../data/items.data.js';
-import { ARMAS } from './IntentParser.js';
+import { ARMAS, leerGesto } from './IntentParser.js';
 import { aSegundaPersona } from '../ai/Persona.js';
-import { articulo, capitalizar, sinAcentos } from '../utils/text.js';
+import { articulo, articuloIndet, capitalizar, sinAcentos } from '../utils/text.js';
 import { VOCES } from '../config/ui.config.js';
 import { curarConTexto, PIDE_CURAR } from '../player/Curacion.js';
 import { SITUACIONES } from '../data/situaciones.data.js';
@@ -81,6 +81,17 @@ export const RUTA = Object.freeze({
   DIRECTOR: 'director',
   RECHAZADA: 'rechazada',
 });
+
+/** Los gestos de `IntentParser.leerGesto`, en infinitivo para preguntar. */
+const INFINITIVO_GESTO = Object.freeze({
+  guardo: 'guardar', envaino: 'envainar', enfundo: 'enfundar', cuelgo: 'colgar',
+  ajusto: 'ajustar', limpio: 'limpiar', afilo: 'afilar', reviso: 'revisar',
+  compruebo: 'comprobar', engraso: 'engrasar', pulo: 'pulir', coloco: 'colocar',
+});
+
+/** Gestos que solo tienen sentido sobre algo con filo. */
+const PIDE_FILO = new Set(['afilo', 'envaino']);
+const CON_FILO = new Set(['espada', 'hacha', 'daga', 'cuchillo', 'punal', 'sable', 'estoque', 'mandoble', 'lanza']);
 
 export class ActionRouter extends SystemBase {
   static nombre = 'router';
@@ -402,45 +413,78 @@ export class ActionRouter extends SystemBase {
    * Un gesto con un arma, narrado contra lo que el personaje lleva.
    *
    * Una enana con un hacha escribió «guardo la espada» y el juego le contestó
-   * como si tuviera una. El motor sabe qué lleva: si el arma nombrada no está,
-   * lo dice y hace el gesto con la que sí está. «No llevas espada; guardas el
-   * hacha de mano.»
+   * como si tuviera una. El motor sabe qué lleva.
+   *
+   * Si lo nombrado no está, se dice qué falta y se pregunta por lo que sí
+   * lleva y admite ese gesto, sin hacer nada ni gastar turno. Antes se hacía
+   * el gesto con el arma equipada («No llevas hacha; afilas el arco corto»):
+   * una acción que nadie pidió, y a veces absurda (afilar un arco o un foco).
+   * Ese contrato se retiró a propósito: sustituir el objeto es decidir por el
+   * jugador, y lo que se hace sobre el equipo (afilar, guardar) se nota luego.
+   *
+   * Y el verbo tiene que casar con el objeto: afilar o envainar piden filo.
    *
    * @param {Object} intencion Con `gesto` de `IntentParser.leerGesto`.
    * @returns {Object}
    * @private
    */
+  /**
+   * Un gesto que va dentro de una orden más larga: devuelve la aclaración
+   * si no se puede hacer tal como se escribió, o null si sí.
+   *
+   * @param {string} texto El trozo de la orden con el gesto.
+   * @returns {Object|null}
+   */
+  comprobarGesto(texto) {
+    const gesto = leerGesto(texto);
+    if (!gesto) return null;
+    const ruta = this._gesto({ gesto, texto });
+    return ruta.ruta === RUTA.RECHAZADA ? ruta : null;
+  }
+
   _gesto(intencion) {
-    const { segunda, arma } = intencion.gesto;
-    const objetos = this.leer('inventory.objetos.porId', {}) ?? {};
+    const { verbo, arma } = intencion.gesto;
+    const objetos = Object.values(this.leer('inventory.objetos.porId', {}) ?? {}).filter((o) => o?.nombre);
     const llano = (t) => sinAcentos(String(t ?? '').toLowerCase());
 
-    const armas = Object.values(objetos).filter((o) => o?.categoria === 'arma');
-    const nombrada = armas.find((o) => llano(o.nombre).split(/\s+/).includes(arma));
-
-    const local = (texto) => ({
-      ruta: RUTA.LOCAL, motivo: null, narracion: texto, voz: VOCES.DM,
-      pistaDirector: null, resultado: { tipo: 'gesto', arma },
-    });
-
-    // La lleva: se narra lo que escribió, en segunda persona.
-    if (nombrada) {
-      return local(`${capitalizar(aSegundaPersona(intencion.texto)).replace(/[.!?…]*$/u, '')}.`);
-    }
+    // Qué clase de cosa es cada objeto («Arco corto» → arco). Todo el
+    // inventario, no solo las armas: el escudo es armadura y se cuelga igual.
+    const tipoDe = (o) => llano(o.nombre).split(/\s+/).find((p) => ARMAS[p]) ?? null;
+    const generoDe = (o) => obtenerPlantilla(o.refId)?.genero ?? ARMAS[tipoDe(o)] ?? 'm';
+    const conArticulo = (o) => {
+      const nombre = o.nombre.charAt(0).toLowerCase() + o.nombre.slice(1);
+      return `${articulo(nombre, generoDe(o))} ${nombre}`;
+    };
 
     // Nombres de arma con tilde, tal y como se escriben.
     const CON_TILDE = { punal: 'puñal', baston: 'bastón' };
     const dicha = CON_TILDE[arma] ?? arma;
+    const infinitivo = INFINITIVO_GESTO[verbo] ?? verbo;
+    const casa = (tipo) => !PIDE_FILO.has(verbo) || CON_FILO.has(tipo);
 
-    // No la lleva. Se hace el gesto con la que sí lleva, si hay alguna.
-    const equipada = objetos[this.leer('inventory.equipado.armaPrincipal')] ?? armas[0];
-    if (!equipada) return local(`No llevas ${dicha} encima. Ni ninguna otra arma.`);
+    // El verbo no casa con lo nombrado: ni se hace ni se busca otra cosa.
+    if (!casa(arma)) {
+      const un = articuloIndet(dicha, ARMAS[arma] ?? 'm');
+      return this._rechazar(`${capitalizar(un)} ${dicha} no se puede ${infinitivo}: no tiene filo.`);
+    }
 
-    const nombre = equipada.nombre.charAt(0).toLowerCase() + equipada.nombre.slice(1);
-    const genero = obtenerPlantilla(equipada.refId)?.genero
-      ?? ARMAS[llano(equipada.nombre).split(/\s+/)[0]] ?? 'm';
+    // Lo lleva: se narra lo que escribió, en segunda persona.
+    if (objetos.some((o) => tipoDe(o) === arma)) {
+      return {
+        ruta: RUTA.LOCAL, motivo: null, voz: VOCES.DM, pistaDirector: null,
+        narracion: `${capitalizar(aSegundaPersona(intencion.texto)).replace(/[.!?…]*$/u, '')}.`,
+        resultado: { tipo: 'gesto', arma },
+      };
+    }
 
-    return local(`No llevas ${dicha}; ${segunda} ${articulo(nombre, genero)} ${nombre}.`);
+    // No lo lleva: se dice y se pregunta. Solo se ofrece lo que admite el gesto.
+    const otras = objetos.filter((o) => tipoDe(o) && casa(tipoDe(o)));
+    if (!otras.length) {
+      return this._rechazar(`No llevas ${dicha}, ni nada más que ${infinitivo}.`);
+    }
+    const lista = otras.map(conArticulo);
+    const cuales = lista.length === 1 ? lista[0] : `${lista.slice(0, -1).join(', ')} o ${lista.at(-1)}`;
+    return this._rechazar(`No llevas ${dicha}. ¿Quieres ${infinitivo} ${cuales}?`);
   }
 
   /**

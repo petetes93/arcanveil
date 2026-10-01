@@ -117,9 +117,13 @@ const HACHA = { id: 'o1', refId: 'hacha_mano', nombre: 'Hacha de mano', categori
     '«guardo la espada» no tira dados ni cuenta como ataque',
     `tipo=${intencion.tipo} tirada=${intencion.requiereTirada}`);
 
+  // Contrato cambiado el 1-oct-2026 (tester): antes se exigía «No llevas
+  // espada; guardas el hacha de mano», es decir, hacer el gesto con otra
+  // arma sin que se pidiera. Con un arco salía «afilas el arco corto». Ahora
+  // se dice qué falta y se pregunta, sin hacer nada ni gastar turno.
   const r = routerCon({ o1: HACHA }, 'o1').enrutar(intencion);
-  comprobar(r.ruta === 'local' && r.narracion === 'No llevas espada; guardas el hacha de mano.',
-    'sin espada, se guarda el hacha que sí lleva', `salió: ${r.narracion}`);
+  comprobar(r.ruta === 'rechazada' && r.narracion === 'No llevas espada. ¿Quieres guardar el hacha de mano?',
+    'sin espada, se dice y se pregunta por el hacha que sí lleva; no se guarda nada', `salió: ${r.ruta} · ${r.narracion}`);
 }
 
 {
@@ -130,7 +134,7 @@ const HACHA = { id: 'o1', refId: 'hacha_mano', nombre: 'Hacha de mano', categori
 
 {
   const r = routerCon({}).enrutar(interpretar('guardo la espada'));
-  comprobar(/^No llevas espada encima/.test(r.narracion ?? ''),
+  comprobar(r.ruta === 'rechazada' && /^No llevas espada, ni nada más que guardar\.$/.test(r.narracion ?? ''),
     'sin ningún arma, lo dice y no inventa una', `salió: ${r.narracion}`);
 }
 

@@ -29,7 +29,7 @@
 
 import { evaluarAmbicion } from './Ambicion.js';
 import { SystemBase } from '../core/SystemBase.js';
-import { interpretar, tipoDeTurno, COMANDOS } from './IntentParser.js';
+import { interpretar, tipoDeTurno, COMANDOS, leerGesto } from './IntentParser.js';
 import { validarRespuesta } from '../ai/ResponseSchema.js';
 import { MemoryStore } from '../ai/MemoryStore.js';
 import { leerTurno } from '../ai/Cronica.js';
@@ -526,6 +526,13 @@ export class TurnResolver extends SystemBase {
     const escena = escenaDesde((r, d) => this.leer(r, d), textosEscena);
     const ir = interpretarTurno(limpio, escena);
     const plan = ir.plan;
+    // «Afilo el cuchillo y ataco a Korsa»: el gesto prepara, el turno lo
+    // decide el ataque. Antes el foco era lo primero y el ataque se perdía
+    // sin decirlo.
+    if (plan.foco && leerGesto(plan.foco.texto)) {
+      const ataque = plan.hechos.find((s) => s !== plan.foco && s.tipo === plan.foco.tipo && interpretar(s.texto, contextoIntencion).tipo === 'attack');
+      if (ataque) plan.foco = ataque;
+    }
     const textoFoco = plan.foco?.texto ?? ir.texto;
     const textoHecho = plan.hechos.length ? unirHechos(plan.hechos) : limpio;
     // Si todo es una condición («si el herrero me sigue mirando, me voy al
@@ -652,7 +659,14 @@ export class TurnResolver extends SystemBase {
 
       // ─── 2d. Enrutado local ───────────────────────────────────────────
       const router = this.sistema('router');
-      const ruta = intervino ? null : router?.enrutar(intencion, contextoIntencion);
+      // Un gesto de la orden sobre algo que no se lleva («afilo el hacha y
+      // ataco», sin hacha) se aclara antes de hacer nada: ni el gesto con
+      // otra cosa ni el resto como si el hacha estuviera.
+      const gestoSinObjeto = intervino ? null : plan.hechos
+        .filter((s) => s !== plan.foco && leerGesto(s.texto))
+        .map((s) => router?.comprobarGesto?.(s.texto))
+        .find(Boolean);
+      const ruta = gestoSinObjeto ?? (intervino ? null : router?.enrutar(intencion, contextoIntencion));
 
       if (ruta?.ruta === 'rechazada') {
         this._anadirEntrada(VOCES.SISTEMA, ruta.narracion, { turno: numeroTurno });
