@@ -28,6 +28,7 @@ import { HABILIDADES, deducirHabilidad } from '../data/skills.data.js';
 import { DIRECTOR } from '../config/ai.config.js';
 import { sinAcentos, limpiar } from '../utils/text.js';
 import { actoDeHabla, ACTO } from './ActoDeHabla.js';
+import { leerRecuento } from './Recuento.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    VOCABULARIO DE INTENCIONES
@@ -519,6 +520,15 @@ export function interpretar(texto, contexto = {}) {
   const gesto = leerGesto(original);
   if (gesto) {
     return { ...base, tipo: 'custom', gesto, requiereTirada: false, objetivo: gesto.arma, confianza: 0.9 };
+  }
+
+  // ─── 2b'. Contar cosas no es contar algo a alguien ──────────────────────
+  // «Cuento las monedas que llevo» puntuaba como hablar («cuento») y salía un
+  // oyente inventado. Es mirar lo que hay; lo resuelve el motor con el dato
+  // del estado (ver `engine/Recuento.js` y `ActionRouter._recontar`).
+  const recuento = leerRecuento(original);
+  if (recuento) {
+    return { ...base, tipo: 'observe', habilidad: 'percepcion', requiereTirada: false, recuento, objetivo: null, confianza: 0.9 };
   }
 
   // ─── 2c'. Lanzarse contra alguien es atacar ─────────────────────────────

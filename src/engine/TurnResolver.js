@@ -48,6 +48,7 @@ import { evaluar } from '../core/Dice.js';
 import { sinAcentos } from '../utils/text.js';
 import { interpretarTurno, escenaDesde } from './Interpretacion.js';
 import { separarVocativo } from './Segmentos.js';
+import { leerRecuento } from './Recuento.js';
 import { infinitivoAPrimera, intento } from './Infinitivo.js';
 
 /** Una huella corta y estable de un texto (FNV-1a), para identificar peticiones. */
@@ -1365,9 +1366,10 @@ export class TurnResolver extends SystemBase {
     // «Busco a Dadar y le pregunto por el hierro» se lee como una búsqueda,
     // pero ha hablado con Dadar. Fuera del diálogo cuenta si hay un verbo de
     // hablar y se nombra a quien está delante; sin nombre, no se adivina.
+    // «Cuento los guardias que hay junto a Xivio» no es hablar con Xivio.
     const deLaFrase = tipo === 'dialogo'
       ? this._aQuienSeHablo(accion)
-      : (HABLA.test(sinAcentos(String(accion ?? '').toLowerCase())) ? this._aQuienSeHablo(accion, { soloNombrado: true }) : null);
+      : (HABLA.test(sinAcentos(String(accion ?? '').toLowerCase())) && !leerRecuento(accion) ? this._aQuienSeHablo(accion, { soloNombrado: true }) : null);
     const npc = declarado ?? deLaFrase;
     if (npc?.refId) {
       this.emitir('npc:talked', { refId: npc.refId, nombre: npc.nombre });

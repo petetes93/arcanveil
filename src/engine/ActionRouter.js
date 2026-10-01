@@ -140,6 +140,11 @@ export class ActionRouter extends SystemBase {
     // que el personaje lleva de verdad.
     if (intencion.gesto) return this._gesto(intencion);
 
+    // ─── Contar lo que hay ──────────────────────────────────────────────
+    // Gente, oro u objetos: el dato está en el estado. Sin dados, sin
+    // director y sin nadie que escuche.
+    if (intencion.recuento) return this._recontar(intencion);
+
     // ─── El grupo ───────────────────────────────────────────────────────
     if (intencion.tipo === 'recruit') return this._reclutar(intencion);
     if (intencion.tipo === 'dismiss') return this._despedir(intencion);
@@ -239,6 +244,59 @@ export class ActionRouter extends SystemBase {
       .map((id) => conocidos[id])
       .filter((n) => n?.nombre && n.vivo !== false && !n.hostil)
       .map((n) => ({ nombre: n.nombre, rol: n.rol ?? null, sitio: donde.get(n.refId) ?? null }));
+  }
+
+  /**
+   * Contar: con el dato del estado, o diciendo que no lo hay.
+   *
+   * «cuento cuánta gente hay» salía como hablar y un PNJ «te escuchaba»;
+   * «cuento las monedas que llevo» no decía el saldo. Aquí se lee lo que
+   * hay: quién está a la vista (y en qué anda, si lo sabe el motor), el oro
+   * de la bolsa, lo que hay en el inventario. Nada cambia: ni el oro, ni el
+   * inventario, ni con quién se habla. Lo que no tiene un número en el
+   * estado no se inventa.
+   *
+   * @private
+   */
+  _recontar(intencion) {
+    const r = intencion.recuento;
+    const local = (texto) => ({
+      ruta: RUTA.LOCAL, motivo: null, narracion: texto, voz: VOCES.DM,
+      pistaDirector: null, resultado: { tipo: 'recuento', que: r.que },
+    });
+    const NUMEROS = ['ninguna', 'una', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez', 'once', 'doce'];
+    const cifra = (n) => NUMEROS[n] ?? String(n);
+
+    if (r.que === 'oro') {
+      const oro = this.leer('player.oro', 0) ?? 0;
+      return local(oro > 0
+        ? `Cuentas lo que llevas en la bolsa: ${oro} ${oro === 1 ? 'moneda' : 'monedas'} de oro.`
+        : 'Rebuscas en la bolsa: no te queda ni una moneda.');
+    }
+
+    if (r.que === 'gente') {
+      const gente = this._gentePresente();
+      if (!gente.length) return local('Cuentas a tu alrededor: aquí no hay nadie más que tú.');
+      const quien = gente.map((g) => [g.nombre, g.rol, r.detalle ? g.sitio : null].filter(Boolean).join(', ')).join('; ');
+      const cuantas = gente.length === 1 ? 'una persona' : `${cifra(gente.length)} personas`;
+      return local(`Cuentas a la gente que tienes a la vista: ${cuantas}. ${capitalizar(quien)}.${r.detalle ? ' De lo que hace cada uno no ves más que eso desde aquí.' : ''}`);
+    }
+
+    if (r.que === 'objeto' && r.termino) {
+      // Por la raíz: «flechas» encuentra «Flecha»; «cuerdas», «Cuerda».
+      const raiz = r.termino.replace(/(?:es|s)$/, '').slice(0, 5);
+      const objetos = Object.values(this.leer('inventory.objetos.porId', {}) ?? {})
+        .filter((o) => o?.nombre && sinAcentos(o.nombre.toLowerCase()).split(/\s+/).some((p) => p.startsWith(raiz)));
+      if (!objetos.length) return local(`Buscas entre lo que llevas: no tienes ${r.termino}.`);
+      const total = objetos.reduce((s, o) => s + (Number.isInteger(o.cantidad) ? o.cantidad : 1), 0);
+      const nombre = objetos[0].nombre.toLowerCase();
+      return local(total === 1
+        ? `Lo compruebas: llevas ${articulo(objetos[0].genero === 'f' ? 'f' : 'm', 'un')} ${nombre}.`
+        : `Lo cuentas: llevas ${total} × ${nombre}.`);
+    }
+
+    // Contar en voz baja, o algo sin cifra en el mundo: se hace, sin número.
+    return local(`Cuentas ${r.termino ?? ''} en voz baja.`.replace(/\s+/g, ' ').replace(' .', '.'));
   }
 
   /** @private */

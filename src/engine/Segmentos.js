@@ -24,6 +24,7 @@
  */
 
 import { sinAcentos } from '../utils/text.js';
+import { leerRecuento } from './Recuento.js';
 
 export const TIPO_SEGMENTO = Object.freeze({
   ACCION: 'accion',
@@ -257,7 +258,8 @@ function clasificar(texto) {
 
   if (ESPERA.test(sinCitas)) return { ...base, tipo: TIPO_SEGMENTO.ESPERA };
 
-  if (CITA.test(texto) || HABLA.test(sinCitas)) {
+  // «Cuento las monedas» no es hablar: no tiene destinatario (ver Recuento.js).
+  if (CITA.test(texto) || (HABLA.test(sinCitas) && !leerRecuento(sinCitas))) {
     CITA.lastIndex = 0;
     return { ...base, tipo: TIPO_SEGMENTO.DIALOGO };
   }
